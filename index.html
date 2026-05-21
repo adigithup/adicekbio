@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ADI FIX RED - Ultimate</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#050816">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = { theme: { extend: { colors: { dark: { 900: '#050816', 800: '#0a0f1e', 700: '#111834', 600: '#1a2342' }, neon: { blue: '#00d4ff', green: '#00ff9d', purple: '#bd00ff', red: '#ff0055', yellow: '#ffe600' } } } } }
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #050816; overflow: hidden; }
+        .glass-card { background: rgba(17, 24, 52, 0.6); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.05); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); }
+        .neon-border-blue { border: 1px solid rgba(0, 212, 255, 0.3); box-shadow: 0 0 15px rgba(0, 212, 255, 0.1); }
+        .neon-border-green { border: 1px solid rgba(0, 255, 157, 0.3); box-shadow: 0 0 15px rgba(0, 255, 157, 0.1); }
+        .neon-border-purple { border: 1px solid rgba(189, 0, 255, 0.3); box-shadow: 0 0 15px rgba(189, 0, 255, 0.1); }
+        .neon-border-yellow { border: 1px solid rgba(255, 230, 0, 0.3); box-shadow: 0 0 15px rgba(255, 230, 0, 0.1); }
+        .btn-glow:hover { transform: translateY(-2px); filter: brightness(1.2); }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #1a2342; border-radius: 4px; }
+        @keyframes spin2 { to { transform: rotate(360deg); } } .spinner2 { animation: spin2 1s linear infinite; }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } } .float-anim { animation: float 3s ease-in-out infinite; }
+        
+        /* Lightweight CSS Background instead of heavy Particles */
+        .grid-bg { background-image: radial-gradient(rgba(0, 212, 255, 0.1) 1px, transparent 1px); background-size: 30px 30px; }
+    </style>
+</head>
+<body class="text-gray-200 h-screen overflow-hidden flex flex-col md:flex-row grid-bg">
+
+<div x-data="app()" class="flex h-full w-full overflow-hidden relative">
+    
+    <!-- LOGIN GATE -->
+    <div x-show="!isAuthenticated" class="fixed inset-0 bg-dark-900 z-[999] flex items-center justify-center">
+        <div class="glass-card p-8 rounded-2xl neon-border-blue w-full max-w-sm text-center">
+            <i class="fas fa-lock text-4xl text-neon-blue mb-4"></i>
+            <h2 class="text-xl font-bold text-white mb-4">System Locked</h2>
+            <input type="password" x-model="authPassword" @keydown.enter="login()" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-neon-blue mb-4" placeholder="Enter Password...">
+            <button @click="login()" class="w-full bg-neon-blue text-dark-900 py-3 rounded-xl font-bold btn-glow">Unlock</button>
+        </div>
+    </div>
+
+    <!-- RECONNECT OVERLAY -->
+    <div x-show="!isServerOnline" class="fixed inset-0 bg-dark-900/90 z-[900] flex items-center justify-center">
+        <div class="text-center"><i class="fas fa-wifi text-4xl text-neon-red mb-3"></i><p class="text-white font-bold">Reconnecting to Server...</p></div>
+    </div>
+
+    <!-- MOBILE SIDEBAR OVERLAY -->
+    <div x-show="sidebarOpen" @click="sidebarOpen = false" class="fixed inset-0 bg-black/50 z-30 md:hidden transition-opacity"></div>
+
+    <!-- SIDEBAR -->
+    <div :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed md:relative z-40 md:translate-x-0 w-72 h-full glass-card border-r border-dark-600 flex flex-col transition-transform duration-300 ease-in-out content-layer">
+        <div class="p-6 border-b border-dark-600 flex justify-between items-center">
+            <h1 class="text-xl font-black tracking-wider text-white flex items-center gap-2"><i class="fas fa-bolt text-neon-blue"></i> ADI FIX RED</h1>
+            <button @click="sidebarOpen = false" class="md:hidden text-gray-400"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="flex-1 p-4 space-y-2 overflow-y-auto">
+            <template x-for="item in menuItems" :key="item.id">
+                <button @click="currentPage = item.id; sidebarOpen = false" :class="currentPage === item.id ? 'bg-neon-blue/10 text-neon-blue neon-border-blue' : 'text-gray-400 hover:bg-dark-600 hover:text-white'" class="w-full text-left p-3.5 rounded-xl transition-all duration-300 flex items-center space-x-3 text-sm font-semibold btn-glow">
+                    <i :class="item.icon" class="w-5 text-center text-base"></i> <span x-text="item.label"></span>
+                </button>
+            </template>
+        </div>
+        <div class="p-4 border-t border-dark-600 space-y-2 text-[10px]">
+            <div class="flex justify-between"><span class="text-gray-400">CPU</span><span class="text-neon-blue" x-text="sysStats.cpu + '%'"></span></div>
+            <div class="w-full bg-dark-700 rounded-full h-1.5"><div class="bg-neon-blue h-1.5 rounded-full" :style="`width: ${sysStats.cpu}%`"></div></div>
+            <div class="flex justify-between"><span class="text-gray-400">RAM</span><span class="text-neon-green" x-text="sysStats.ramUsed + '%'"></span></div>
+            <div class="w-full bg-dark-700 rounded-full h-1.5"><div class="bg-neon-green h-1.5 rounded-full" :style="`width: ${sysStats.ramUsed}%`"></div></div>
+            <div class="flex justify-between"><span class="text-gray-400">Ping</span><span class="text-neon-yellow" x-text="sysStats.ping + 'ms'"></span></div>
+            <a :href="settings.tg_channel" target="_blank" class="block text-neon-blue hover:text-white mt-2"><i class="fab fa-telegram"></i> Channel</a>
+            <a :href="settings.tg_group" target="_blank" class="block text-neon-purple hover:text-white"><i class="fab fa-telegram-plane"></i> Grup</a>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="flex-1 flex flex-col overflow-hidden relative content-layer">
+        
+        <!-- Top Bar -->
+        <div class="h-16 flex items-center justify-between px-4 md:px-8 border-b border-dark-600 glass-card z-10">
+            <div class="flex items-center gap-3">
+                <button @click="sidebarOpen = true" class="md:hidden text-white text-xl"><i class="fas fa-bars"></i></button>
+                <h2 class="text-base md:text-lg font-bold text-white tracking-wide" x-text="currentPageTitle"></h2>
+            </div>
+            <div class="flex items-center gap-3">
+                <select x-model="activeSession" class="bg-dark-700 border border-dark-600 rounded-lg px-2 py-1 text-[11px] text-white outline-none focus:border-neon-blue max-w-[120px]">
+                    <template x-for="s in sessions" :key="s.sessionId"><option :value="s.sessionId" x-text="s.sessionId"></option></template>
+                </select>
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-dark-700 border border-dark-600 text-[11px] font-semibold">
+                    <i class="fas fa-circle text-[6px]" :class="waStatus[activeSession]?.status === 'connected' ? 'text-neon-green' : 'text-neon-red'"></i>
+                    <span x-text="waStatus[activeSession]?.status === 'connected' ? 'ON' : 'OFF'"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+            
+            <!-- DASHBOARD -->
+            <div x-show="currentPage === 'dashboard'" class="space-y-6">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="glass-card p-4 rounded-xl neon-border-blue float-anim"><p class="text-[10px] text-gray-400 uppercase">Process</p><p class="text-2xl font-bold text-white">1,245</p></div>
+                    <div class="glass-card p-4 rounded-xl neon-border-green float-anim" style="animation-delay: 0.2s"><p class="text-[10px] text-gray-400 uppercase">Online</p><p class="text-2xl font-bold text-neon-green" x-text="liveStats.onlineUsers"></p></div>
+                    <div class="glass-card p-4 rounded-xl neon-border-purple float-anim" style="animation-delay: 0.4s"><p class="text-[10px] text-gray-400 uppercase">Visitors</p><p class="text-2xl font-bold text-neon-purple" x-text="sysStats.visitors"></p></div>
+                    <div class="glass-card p-4 rounded-xl neon-border-yellow float-anim" style="animation-delay: 0.6s"><p class="text-[10px] text-gray-400 uppercase">Uptime</p><p class="text-2xl font-bold text-neon-yellow" x-text="Math.floor(sysStats.uptime / 3600) + 'h'"></p></div>
+                </div>
+                <div class="glass-card p-4 rounded-xl neon-border-blue">
+                    <div class="flex justify-between items-center mb-2"><h3 class="text-xs font-bold text-gray-300 uppercase"><i class="fas fa-terminal text-neon-green mr-2"></i>System Logs</h3><button @click="clearLogs()" class="text-[10px] text-neon-red hover:text-white"><i class="fas fa-trash"></i> Clear</button></div>
+                    <div class="bg-dark-900 p-3 rounded-lg h-48 md:h-64 overflow-y-auto font-mono text-[11px] text-gray-400 space-y-1 border border-dark-700" x-ref="logContainer">
+                        <template x-for="(log, index) in logs" :key="index"><p><span class="text-neon-blue" x-text="log.time"></span> <span x-text="log.msg"></span></p></template>
+                    </div>
+                </div>
+                <div class="glass-card p-4 rounded-xl neon-border-purple h-64"><canvas id="statsChart"></canvas></div>
+            </div>
+
+            <!-- WA CONNECTION -->
+            <div x-show="currentPage === 'connection'" class="max-w-lg mx-auto space-y-4">
+                <div class="glass-card p-4 rounded-xl neon-border-blue flex justify-between items-center">
+                    <h3 class="font-bold text-sm text-white">Session Manager</h3>
+                    <div class="flex gap-2">
+                        <button @click="addSession()" class="px-3 py-1 bg-neon-green/20 border border-neon-green/30 rounded-md text-neon-green text-[10px] font-bold"><i class="fas fa-plus"></i> Add</button>
+                        <button @click="deleteSession()" class="px-3 py-1 bg-neon-red/20 border border-neon-red/30 rounded-md text-neon-red text-[10px] font-bold"><i class="fas fa-trash"></i> Del</button>
+                    </div>
+                </div>
+                <div class="glass-card p-6 rounded-2xl neon-border-green space-y-4 text-center">
+                    <div x-show="waStatus[activeSession]?.status !== 'connected'">
+                        <div x-show="waStatus[activeSession]?.qr" class="flex justify-center mb-4"><img :src="waStatus[activeSession]?.qr" class="w-56 h-56 bg-white p-2 rounded-lg"></div>
+                        <div x-show="waStatus[activeSession]?.pairing" class="p-4 bg-dark-900 rounded-xl border border-dashed border-neon-yellow mb-4"><p class="text-[10px] text-gray-400">Pairing Code</p><h2 class="text-4xl font-black text-neon-yellow tracking-[0.3em]" x-text="waStatus[activeSession]?.pairing"></h2></div>
+                        <div class="space-y-3">
+                            <input type="text" x-model="pairInput" placeholder="628xxx" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-3 text-sm text-white outline-none">
+                            <button @click="reqPairing()" class="w-full bg-neon-green text-dark-900 py-3 rounded-xl text-sm font-bold btn-glow"><i class="fas fa-link mr-2"></i>Pairing</button>
+                            <button @click="reqQR()" class="w-full bg-neon-blue text-dark-900 py-3 rounded-xl text-sm font-bold btn-glow"><i class="fas fa-qrcode mr-2"></i>QR Code</button>
+                        </div>
+                    </div>
+                    <div x-show="waStatus[activeSession]?.status === 'connected'">
+                        <div class="p-6 bg-neon-green/10 border border-neon-green/30 rounded-xl text-neon-green font-bold text-lg mb-4">✅ WA CONNECTED</div>
+                        <button @click="disconnectWA(false)" class="w-full bg-neon-yellow text-dark-900 py-3 rounded-xl text-sm font-bold btn-glow mb-2"><i class="fas fa-power-off mr-2"></i>Disconnect</button>
+                        <button @click="disconnectWA(true)" class="w-full bg-neon-red text-white py-3 rounded-xl text-sm font-bold btn-glow"><i class="fas fa-trash mr-2"></i>Delete Session</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WA TOOLS -->
+            <div x-show="currentPage === 'tools'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="glass-card p-5 rounded-xl neon-border-blue">
+                    <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-id-badge text-neon-blue mr-2"></i>Cek Bio WA</h3>
+                    <div class="mb-3 border-2 border-dashed border-dark-600 rounded-lg p-4 text-center cursor-pointer" @click="$refs.fileInputBio.click()">
+                        <input type="file" x-ref="fileInputBio" class="hidden" accept=".txt,.csv,.xlsx,.json" @change="handleFileUpload($event)"><i class="fas fa-cloud-upload-alt text-neon-blue text-xl"></i><p class="text-[11px] text-gray-400 mt-1">Upload File</p>
+                    </div>
+                    <textarea x-model="toolInput" rows="3" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-2 text-xs mb-3 outline-none" placeholder="Input manual..."></textarea>
+                    <button @click="runTool('cekbio')" :disabled="isLoading" class="w-full bg-neon-blue text-dark-900 py-2.5 rounded-lg text-xs font-bold btn-glow disabled:opacity-50"><i class="fas fa-search mr-1"></i> Cek Bio</button>
+                </div>
+                <div class="glass-card p-5 rounded-xl neon-border-green">
+                    <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-check-circle text-neon-green mr-2"></i>Cek Nomor</h3>
+                    <div class="mb-3 border-2 border-dashed border-dark-600 rounded-lg p-4 text-center cursor-pointer" @click="$refs.fileInputNom.click()">
+                        <input type="file" x-ref="fileInputNom" class="hidden" accept=".txt,.csv,.xlsx,.json" @change="handleFileUpload($event)"><i class="fas fa-cloud-upload-alt text-neon-green text-xl"></i><p class="text-[11px] text-gray-400 mt-1">Upload File</p>
+                    </div>
+                    <textarea x-model="toolInput" rows="3" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-2 text-xs mb-3 outline-none" placeholder="Input manual..."></textarea>
+                    <button @click="runTool('ceknom')" :disabled="isLoading" class="w-full bg-neon-green text-dark-900 py-2.5 rounded-lg text-xs font-bold btn-glow disabled:opacity-50"><i class="fas fa-search mr-1"></i> Cek Nomor</button>
+                </div>
+                
+                <!-- Progress Bar with ETA -->
+                <div x-show="isLoading && progress.total > 0" class="glass-card p-4 rounded-xl md:col-span-2 neon-border-purple">
+                    <div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Processing...</span><span class="text-neon-purple" x-text="progress.current + '/' + progress.total + ' | ETA: ' + progress.eta"></span></div>
+                    <div class="w-full bg-dark-700 rounded-full h-2"><div class="bg-neon-purple h-2 rounded-full transition-all" :style="`width: ${(progress.current / progress.total) * 100}%`"></div></div>
+                </div>
+
+                <div class="glass-card p-5 rounded-xl md:col-span-2 neon-border-purple">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-2">
+                        <h3 class="font-bold text-white flex items-center text-sm"><i class="fas fa-chart-bar text-neon-purple mr-2"></i>Result & Stats</h3>
+                        <input type="text" x-model="searchResult" class="w-full md:w-48 bg-dark-900 border border-dark-600 rounded-lg px-3 py-1.5 text-[11px] outline-none" placeholder="Search result...">
+                        <div class="flex gap-2">
+                            <button @click="exportData('txt')" class="px-2 py-1 bg-dark-600 border border-dark-500 rounded text-[10px] text-gray-400 hover:bg-dark-500">TXT</button>
+                            <button @click="exportData('csv')" class="px-2 py-1 bg-dark-600 border border-dark-500 rounded text-[10px] text-gray-400 hover:bg-dark-500">CSV</button>
+                            <button @click="exportData('json')" class="px-2 py-1 bg-dark-600 border border-dark-500 rounded text-[10px] text-gray-400 hover:bg-dark-500">JSON</button>
+                            <button @click="copyResults()" class="px-3 py-1 bg-neon-purple/20 border border-neon-purple/30 rounded text-neon-purple text-[10px]">Copy</button>
+                        </div>
+                    </div>
+                    <div class="bg-dark-900 p-3 rounded-lg h-64 md:h-80 overflow-y-auto font-mono text-[11px] text-gray-400 whitespace-pre-wrap border border-dark-700" x-text="filteredResult"></div>
+                </div>
+            </div>
+
+            <!-- FIX & BANDING -->
+            <div x-show="currentPage === 'fix'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="glass-card p-5 rounded-xl neon-border-yellow">
+                    <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-envelope text-neon-yellow mr-2"></i>Fix Merah</h3>
+                    <input type="text" x-model="fixNumber" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-3 text-xs mb-3 outline-none" placeholder="628xxx">
+                    <button @click="runTool('fix')" :disabled="isLoading" class="w-full bg-neon-yellow text-dark-900 py-2.5 rounded-lg text-xs font-bold btn-glow disabled:opacity-50"><i class="fas fa-paper-plane mr-1"></i> Fix</button>
+                </div>
+                <div class="glass-card p-5 rounded-xl neon-border-purple">
+                    <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-gavel text-neon-purple mr-2"></i>Banding</h3>
+                    <input type="text" x-model="fixNumber" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-3 text-xs mb-3 outline-none" placeholder="628xxx">
+                    <button @click="runTool('banding')" :disabled="isLoading" class="w-full bg-neon-purple text-white py-2.5 rounded-lg text-xs font-bold btn-glow disabled:opacity-50"><i class="fas fa-balance-scale mr-1"></i> Banding</button>
+                </div>
+                <div class="glass-card p-5 rounded-xl md:col-span-2 neon-border-blue">
+                    <div class="flex justify-between items-center mb-3"><h3 class="font-bold text-white text-sm"><i class="fas fa-terminal text-neon-blue mr-2"></i>Output</h3><button @click="copyResults()" class="px-3 py-1 bg-neon-blue/20 border border-neon-blue/30 rounded text-neon-blue text-[10px]">Copy</button></div>
+                    <div class="bg-dark-900 p-3 rounded-lg h-48 md:h-64 overflow-y-auto font-mono text-[11px] text-gray-400 whitespace-pre-wrap border border-dark-700" x-text="toolResult || 'Waiting...'"></div>
+                </div>
+            </div>
+
+            <!-- SETTINGS -->
+            <div x-show="currentPage === 'settings'" class="max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="glass-card p-5 rounded-xl neon-border-blue space-y-3">
+                    <h3 class="font-bold text-white text-sm"><i class="fas fa-cog text-neon-blue mr-2"></i>System Config</h3>
+                    <input type="email" x-model="setEmail" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Email SMTP">
+                    <input type="text" x-model="setPass" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="App Password">
+                    <input type="text" x-model="setTgChannel" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Link Channel TG">
+                    <input type="text" x-model="setTgGroup" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Link Grup TG">
+                    <input type="password" x-model="setAuthPass" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Login Password (Empty=No Pass)">
+                    <button @click="saveConfig()" class="w-full bg-neon-blue text-dark-900 py-2.5 rounded-xl text-xs font-bold btn-glow"><i class="fas fa-save mr-1"></i> Save</button>
+                </div>
+                <div class="glass-card p-5 rounded-xl neon-border-purple space-y-3">
+                    <h3 class="font-bold text-white text-sm"><i class="fas fa-sliders-h text-neon-purple mr-2"></i>Performance</h3>
+                    <div><label class="text-[10px] text-gray-400">Check Delay (ms)</label><input type="number" x-model="setDelay" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none"></div>
+                    <div><label class="text-[10px] text-gray-400">Cooldown Frontend (s)</label><input type="number" x-model="setCooldown" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none"></div>
+                    <button @click="saveLimits()" class="w-full bg-neon-purple text-white py-2.5 rounded-xl text-xs font-bold btn-glow"><i class="fas fa-save mr-1"></i> Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function playSound(type) {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        gain.gain.value = 0.1;
+        osc.frequency.value = type === 'success' ? 900 : 300;
+        osc.type = 'sine';
+        osc.start(); osc.stop(ctx.currentTime + 0.15);
+    } catch(e) {}
+}
+
+function app() {
+    return {
+        currentPage: 'dashboard', sidebarOpen: false, isAuthenticated: false, authPassword: '', isServerOnline: true,
+        pairInput: '', toolInput: '', toolResult: '', copyData: '', fixNumber: '', searchResult: '',
+        setEmail: '', setPass: '', setDelay: '1000', setCooldown: '5', setTgChannel: '', setTgGroup: '', setAuthPass: '',
+        isLoading: false, loadingText: '', progress: { current: 0, total: 0, eta: '0s' },
+        logs: [], socket: null, sysStats: { cpu: 0, ramUsed: 0, visitors: 0, uptime: 0, ping: 0 }, liveStats: { onlineUsers: 0 },
+        toast: { show: false, type: 'success', title: '', msg: '', timer: null },
+        activeSession: 'default_admin',
+        waStatus: {}, sessions: [], settings: {}, lastToolRun: 0,
+        
+        menuItems: [
+            { id: 'dashboard', label: 'Dashboard', icon: 'fas fa-chart-line' },
+            { id: 'connection', label: 'My WA', icon: 'fab fa-whatsapp' },
+            { id: 'tools', label: 'Checker', icon: 'fas fa-search' },
+            { id: 'fix', label: 'Fix', icon: 'fas fa-first-aid' },
+            { id: 'settings', label: 'Settings', icon: 'fas fa-cog' }
+        ],
+        get currentPageTitle() { return this.menuItems.find(i => i.id === this.currentPage)?.label || ''; },
+        get filteredResult() { 
+            if(!this.searchResult) return this.toolResult;
+            return this.toolResult.split('\n').filter(line => line.toLowerCase().includes(this.searchResult.toLowerCase())).join('\n');
+        },
+
+        init() {
+            this.socket = io();
+            
+            this.socket.on('connect', () => { this.isServerOnline = true; });
+            this.socket.on('disconnect', () => { this.isServerOnline = false; });
+
+            this.socket.on('init_data', (data) => {
+                this.settings = data.settings;
+                this.sessions = data.sessions;
+                if(this.sessions.length > 0 && !this.sessions.find(s => s.sessionId === this.activeSession)) this.activeSession = this.sessions[0].sessionId;
+                if(data.settings.auth_password && data.settings.auth_password !== '') this.isAuthenticated = false;
+                else this.isAuthenticated = true;
+                this.initFormValues(data.settings);
+                data.sessions.forEach(s => { if(!this.waStatus[s.sessionId]) this.waStatus[s.sessionId] = {}; this.waStatus[s.sessionId].status = s.status; });
+            });
+
+            this.socket.on('log', (msg) => {
+                this.logs.push({ time: new Date().toLocaleTimeString(), msg });
+                if (this.logs.length > 150) this.logs.shift();
+                this.$nextTick(() => { if (this.$refs.logContainer) this.$refs.logContainer.scrollTop = this.$refs.logContainer.scrollHeight; });
+            });
+
+            this.socket.on('wa_status', (data) => {
+                if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {};
+                this.waStatus[data.sessionId].status = data.status;
+                if(data.number) this.waStatus[data.sessionId].number = data.number;
+                if(data.status === 'connected') { this.isLoading = false; playSound('success'); this.showToast('success', 'Connected!', `WA ${data.sessionId} Online`); }
+                if(data.status === 'disconnected' && this.waStatus[data.sessionId]?.number) { playSound('error'); this.showToast('error', 'Disconnected!', `WA ${data.sessionId} Offline`); }
+            });
+            this.socket.on('qr', (data) => { if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {}; this.waStatus[data.sessionId].qr = data.qr; this.waStatus[data.sessionId].pairing = null; this.isLoading = false; });
+            this.socket.on('pairing_code', (data) => { if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {}; this.waStatus[data.sessionId].pairing = data.code; this.waStatus[data.sessionId].qr = null; this.isLoading = false; });
+            
+            this.socket.on('progress', (data) => { this.progress = data; });
+            this.socket.on('system_stats', (stats) => { this.sysStats = stats; });
+            this.socket.on('live_stats', (stats) => { this.liveStats = stats; });
+
+            this.socket.on('tool_result', (data) => {
+                this.toolResult = data.result; this.copyData = data.copyData || ''; this.isLoading = false; this.progress = { current: 0, total: 0, eta: '0s' };
+                this.showToast('success', 'Done!', `Process finished.`); playSound('success');
+            });
+
+            // Init Chart
+            const ctx = document.getElementById('statsChart')?.getContext('2d');
+            if(ctx) new Chart(ctx, { type: 'line', data: { labels: ['1','2','3','4','5'], datasets: [{ label: 'Process', data: [12, 19, 3, 5, 2], borderColor: '#00d4ff', tension: 0.1 }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
+        },
+
+        initFormValues(s) { this.setEmail=s.active_email; this.setPass=s.active_pass; this.setDelay=s.check_delay; this.setCooldown=s.cooldown_time/1000; this.setTgChannel=s.tg_channel; this.setTgGroup=s.tg_group; this.setAuthPass=s.auth_password; },
+        login() { this.socket.emit('login', this.authPassword, (res) => { if(res.success) { this.isAuthenticated = true; playSound('success'); } else this.showToast('error', 'Error', 'Wrong Password'); }); },
+        showToast(type, title, msg) { if(this.toast.timer) clearTimeout(this.toast.timer); this.toast = { show: true, type, title, msg, timer: null }; this.toast.timer = setTimeout(() => { this.toast.show = false; }, 4000); },
+        copyResults() { navigator.clipboard.writeText(this.copyData).then(() => { this.showToast('success', 'Copied!', ''); playSound('success'); }); },
+        exportData(format) { window.open(`/api/export/${format}?data=${encodeURIComponent(this.copyData)}`, '_blank'); },
+        clearLogs() { this.logs = []; this.socket.emit('clear_logs'); },
+
+        addSession() { const id = prompt("Enter Session ID (e.g., user_3):"); if(id && !this.sessions.find(s=>s.sessionId===id)) { this.sessions.push({sessionId: id, status: 'disconnected'}); this.activeSession = id; this.waStatus[id] = {status:'disconnected'}; } },
+        deleteSession() { if(confirm(`Delete ${this.activeSession}?`)) { this.socket.emit('disconnect_wa', { sessionId: this.activeSession, delete: true }); this.sessions = this.sessions.filter(s=>s.sessionId !== this.activeSession); this.activeSession = this.sessions[0]?.sessionId || 'default_admin'; } },
+
+        async handleFileUpload(event) {
+            const file = event.target.files[0]; if (!file) return;
+            const formData = new FormData(); formData.append('file', file);
+            try { const res = await fetch('/api/upload', { method: 'POST', body: formData }); const data = await res.json(); if(data.numbers) { this.toolInput = data.numbers.join('\n'); this.showToast('success', 'Loaded', `${data.numbers.length} valid numbers`); } else this.showToast('error', 'Error', 'Invalid file'); } catch(e) { this.showToast('error', 'Error', 'Upload failed'); }
+        },
+
+        reqPairing() { if (!this.pairInput) return; this.isLoading = true; this.socket.emit('request_pairing', { sessionId: this.activeSession, number: this.pairInput }); },
+        reqQR() { this.isLoading = true; this.socket.emit('request_qr', { sessionId: this.activeSession }); },
+        disconnectWA(del = false) { this.socket.emit('disconnect_wa', { sessionId: this.activeSession, delete: del }); },
+
+        runTool(tool) {
+            if (this.isLoading) return; // Anti double click
+            const now = Date.now();
+            if (now - this.lastToolRun < (this.setCooldown * 1000)) return this.showToast('error', 'Cooldown', 'Wait a moment...');
+            this.lastToolRun = now;
+
+            if (!this.toolInput && (tool === 'cekbio' || tool === 'ceknom')) return this.showToast('error', 'Error', 'No input!');
+            if (!this.fixNumber && (tool === 'fix' || tool === 'banding')) return this.showToast('error', 'Error', 'No target!');
+            
+            this.isLoading = true; this.loadingText = `Running ${tool}...`; this.toolResult = 'Queued...'; this.copyData = ''; this.progress = { current: 0, total: 0, eta: '0s' };
+            this.socket.emit('run_tool', { tool, payload: { numbers: this.toolInput, number: this.fixNumber, sessionId: this.activeSession } });
+        },
+
+        saveConfig() { this.socket.emit('save_settings', { active_email: this.setEmail, active_pass: this.setPass, tg_channel: this.setTgChannel, tg_group: this.setTgGroup, auth_password: this.setAuthPass }); this.showToast('success', 'Saved', 'Config updated'); },
+        saveLimits() { this.socket.emit('save_settings', { check_delay: this.setDelay, cooldown_time: this.setCooldown * 1000 }); this.showToast('success', 'Saved', 'Performance updated'); }
+    }
+}
+</script>
+</body>
+</html>
