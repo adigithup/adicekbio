@@ -398,12 +398,16 @@ cron.schedule('0 */6 * * *', () => {
     log('[CRON] Auto backup executed.');
 });
 
-const PORT = 10689;
-server.listen(PORT, () => {
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n╔═════════════════════════════════════════════════════════════════╗`);
     console.log(`║   🚀 ADI FIX RED v9.0 - FINAL ULTIMATE EDITION               ║`);
     console.log(`║   🌐 http://localhost:${PORT}                                    ║`);
     console.log(`║   📱 PWA Ready | 🔒 Auth | ⚡ GZIP | 🛡 CPU Protect          ║`);
     console.log(`╚═════════════════════════════════════════════════════════════════╝\n`);
-    db.load('wa_sessions').filter(s => s.status === 'connected').forEach(s => startWhatsApp(s.sessionId));
+
+    db.load('wa_sessions')
+      .filter(s => s.status === 'connected')
+      .forEach(s => startWhatsApp(s.sessionId));
 });
