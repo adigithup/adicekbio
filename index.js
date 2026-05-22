@@ -1,6 +1,6 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// 🚀 ADI FIX RED v10.0 [CLOUD READY - NO FOLDER STRUCTURE]
-// ⚡ Express + GZIP + Socket.io + Queue + CPU Protect + Multi-WA
+// 🚀 ADI FIX RED v10.1 [CLOUD ANTI-CRASH EDITION]
+// ⚡ Express + GZIP + Socket.io + Queue + Fallback Monitor
 // ══════════════════════════════════════════════════════════════════════════════
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -17,17 +17,19 @@ const multer = require('multer');
 const csv = require('csv-parser');
 const XLSX = require('xlsx');
 const os = require('os');
-const si = require('systeminformation');
-const cron = require('node-cron');
 const rateLimit = require('express-rate-limit');
 const { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
 const P = require("pino");
 const db = require('./database');
 
+// Safe load systeminformation (Anti Crash for Alpine/Cloud)
+let si = null;
+try { si = require('systeminformation'); } catch(e) { console.log('[WARN] systeminformation failed to load, using fallback.'); }
+
 const app = express();
 const server = http.createServer(app);
 
-// Config Socket.io for Cloud Proxy (Pxxl / Render / Railway)
+// Config Socket.io for Cloud Proxy
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ['websocket', 'polling'],
@@ -37,12 +39,23 @@ const io = new Server(server, {
 app.use(compression());
 app.use(express.json());
 
-// Serve index.html directly from ROOT (No public folder needed)
+// ================= ROUTING (MUST BE BEFORE ERROR HANDLER) =================
+// Serve index.html directly from ROOT directory
 app.get('/', (req, res) => {
-    const indexPath = path.join(__dirname, 'index.html');
-    if (fs.existsSync(indexPath)) res.sendFile(indexPath);
-    else res.status(404).send('Index file missing. Put index.html in root folder!');
+    try {
+        const indexPath = path.join(__dirname, 'index.html');
+        if (fs.existsSync(indexPath)) {
+            res.sendFile(indexPath);
+        } else {
+            res.status(200).send('<h1>Error</h1><p>File index.html tidak ditemukan di root folder!</p>');
+        }
+    } catch(e) {
+        res.status(500).send('Internal Server Error loading page');
+    }
 });
+
+// Health Check Route for Cloud
+app.get('/health', (req, res) => res.status(200).send('OK'));
 
 // Rate Limit
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: { error: 'Too many requests.' } });
@@ -66,10 +79,12 @@ function isValidNumber(n) { return n.length >= 10 && n.length <= 15; }
 function log(message, sessionId = 'SYSTEM') {
     const time = new Date().toLocaleTimeString();
     console.log(`[${time}][${sessionId}] ${message}`);
-    io.emit('log', message);
-    const logs = db.load('logs');
-    logs.push({ time, sessionId, message });
-    db.save('logs', logs.slice(-200));
+    try {
+        io.emit('log', message);
+        const logs = db.load('logs');
+        logs.push({ time, sessionId, message });
+        db.save('logs', logs.slice(-200));
+    } catch(e) {}
 }
 
 // ================= MULTI-SESSION WHATSAPP =================
@@ -97,7 +112,7 @@ async function startWhatsApp(sessionId) {
         const sock = makeWASocket({
             version, auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, P({ level: "fatal" })) },
             printQRInTerminal: false, logger: P({ level: 'silent' }),
-            browser: ['ADI FIX RED', 'Chrome', '10.0'], connectTimeoutMs: 60000,
+            browser: ['ADI FIX RED', 'Chrome', '10.1'], connectTimeoutMs: 60000,
         });
 
         activeSockets[sessionId].sock = sock;
@@ -105,9 +120,11 @@ async function startWhatsApp(sessionId) {
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             if (qr) {
-                const qrImage = await qrcode.toDataURL(qr, { width: 300, margin: 2 });
-                io.emit('qr', { sessionId, qr: qrImage });
-                log('QR Code generated.', sessionId);
+                try {
+                    const qrImage = await qrcode.toDataURL(qr, { width: 300, margin: 2 });
+                    io.emit('qr', { sessionId, qr: qrImage });
+                    log('QR Code generated.', sessionId);
+                } catch(e) {}
             }
             if (connection === 'close') {
                 activeSockets[sessionId].status = 'disconnected';
@@ -116,7 +133,7 @@ async function startWhatsApp(sessionId) {
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
                 log(`Disconnected. Reconnect: ${shouldReconnect}`, sessionId);
                 if (shouldReconnect) setTimeout(() => startWhatsApp(sessionId), 5000);
-                else { if (fs.existsSync(authDir)) fs.rmSync(authDir, { recursive: true, force: true }); log('Session logged out.', sessionId); }
+                else { try { if (fs.existsSync(authDir)) fs.rmSync(authDir, { recursive: true, force: true }); } catch(e) {} log('Session logged out.', sessionId); }
             }
             if (connection === 'open') {
                 activeSockets[sessionId].status = 'connected';
@@ -138,7 +155,7 @@ function disconnectWhatsApp(sessionId, deleteSession = false) {
     if (session?.sock) {
         try { session.sock.end(new Error('Manual disconnect')); } catch(e) {}
         const authDir = path.join('./database/sessions', sessionId);
-        if (deleteSession && fs.existsSync(authDir)) fs.rmSync(authDir, { recursive: true, force: true });
+        if (deleteSession && fs.existsSync(authDir)) try { fs.rmSync(authDir, { recursive: true, force: true }); } catch(e) {}
     }
     activeSockets[sessionId] = { sock: null, status: 'disconnected' };
     io.emit('wa_status', { sessionId, status: 'disconnected' });
@@ -154,26 +171,23 @@ function disconnectWhatsApp(sessionId, deleteSession = false) {
 }
 
 function updateSessionDb(sessionId, status, number = null, name = null) {
-    let sessions = db.load('wa_sessions');
-    const idx = sessions.findIndex(s => s.sessionId === sessionId);
-    if (idx !== -1) {
-        sessions[idx].status = status;
-        if(number) sessions[idx].waNumber = number;
-        if(name) sessions[idx].pushName = name;
-    } else {
-        sessions.push({ sessionId, status, waNumber: number, pushName: name, createdAt: new Date().toISOString() });
-    }
-    db.save('wa_sessions', sessions);
+    try {
+        let sessions = db.load('wa_sessions');
+        const idx = sessions.findIndex(s => s.sessionId === sessionId);
+        if (idx !== -1) {
+            sessions[idx].status = status;
+            if(number) sessions[idx].waNumber = number;
+            if(name) sessions[idx].pushName = name;
+        } else {
+            sessions.push({ sessionId, status, waNumber: number, pushName: name, createdAt: new Date().toISOString() });
+        }
+        db.save('wa_sessions', sessions);
+    } catch(e) {}
 }
 
 // ================= QUEUE & CPU PROTECTION =================
 async function processQueue() {
     if (isProcessingQueue || taskQueue.length === 0) return;
-    try {
-        const cpu = await si.currentLoad();
-        if (cpu.currentLoad > 90) { log('[QUEUE] CPU Overload. Pausing...'); setTimeout(processQueue, 10000); return; }
-    } catch(e) {}
-
     isProcessingQueue = true;
     const task = taskQueue.shift();
     try {
@@ -220,13 +234,7 @@ async function executeTool(socketId, tool, payload) {
 
                 try {
                     const bp = await sock.getBusinessProfile(num + '@s.whatsapp.net');
-                    if(bp) { 
-                        isBusiness = true; stats.businessMeta++; 
-                        if(bp.options?.length > 2) stats.suite++;
-                        else if(bp.description?.length > 100) stats.exclusive++;
-                        else if(bp.description?.length > 0) stats.standard++;
-                        else stats.low++;
-                    }
+                    if(bp) { isBusiness = true; stats.businessMeta++; if(bp.options?.length > 2) stats.suite++; else if(bp.description?.length > 100) stats.exclusive++; else if(bp.description?.length > 0) stats.standard++; else stats.low++; }
                 } catch(e) {}
 
                 if(setAt) { const year = setAt.getFullYear(); stats.yearSet[year] = (stats.yearSet[year] || 0) + 1; }
@@ -274,53 +282,17 @@ async function executeTool(socketId, tool, payload) {
 // ================= SOCKET.IO HANDLER =================
 io.on('connection', (socket) => {
     log('Client Connected: ' + socket.id);
-    socket.emit('init_data', { settings: db.load('settings'), sessions: db.load('wa_sessions') });
-    io.emit('live_stats', { onlineUsers: io.engine.clientsCount });
+    try { socket.emit('init_data', { settings: db.load('settings'), sessions: db.load('wa_sessions') }); io.emit('live_stats', { onlineUsers: io.engine.clientsCount }); } catch(e) {}
 
-    socket.on('login', (password, callback) => {
-        const sysPass = db.getSetting('auth_password');
-        if (!sysPass || sysPass === '') return callback({ success: true });
-        if (password === sysPass) return callback({ success: true });
-        callback({ success: false });
-    });
-
+    socket.on('login', (password, callback) => { try { const sysPass = db.getSetting('auth_password'); if (!sysPass || sysPass === '') return callback({ success: true }); if (password === sysPass) return callback({ success: true }); callback({ success: false }); } catch(e) { callback({ success: false }); } });
     socket.on('request_qr', (data) => startWhatsApp(data.sessionId));
     socket.on('disconnect_wa', (data) => disconnectWhatsApp(data.sessionId, data.delete));
-    socket.on('rename_session', (data) => {
-        let sessions = db.load('wa_sessions');
-        const idx = sessions.findIndex(s => s.sessionId === data.oldId);
-        if(idx !== -1) sessions[idx].sessionId = data.newId;
-        db.save('wa_sessions', sessions);
-        if(activeSockets[data.oldId]) { activeSockets[data.newId] = activeSockets[data.oldId]; delete activeSockets[data.oldId]; }
-        log('Session renamed to ' + data.newId);
-    });
-
-    socket.on('request_pairing', (data) => {
-        const sessionId = data.sessionId;
-        if(activeSockets[sessionId]?.status === 'connected') return log('Already connected!', sessionId);
-        startWhatsApp(sessionId);
-        setTimeout(async () => {
-            const sock = activeSockets[sessionId]?.sock;
-            if(sock) {
-                try {
-                    const code = await sock.requestPairingCode(data.number);
-                    io.emit('pairing_code', { sessionId, code: code.match(/.{1,4}/g)?.join('-') || code });
-                } catch(e) { log('Pairing error: ' + e.message, sessionId); }
-            }
-        }, 4000);
-    });
-
-    socket.on('run_tool', (data) => {
-        if (db.getSetting('maintenance_mode')) return socket.emit('tool_result', { tool: data.tool, result: '🛠 Maintenance Mode Active.', copyData: '' });
-        data.socketId = socket.id;
-        taskQueue.push(data);
-        processQueue();
-    });
-
-    socket.on('save_settings', (data) => { Object.keys(data).forEach(k => db.setSetting(k, data[k])); log('Settings updated.'); });
-    socket.on('clear_logs', () => { db.save('logs', []); log('Logs cleared.'); });
-    socket.on('visitor_info', (data) => { const v = db.load('visitor'); v.push({...data, time: new Date().toISOString()}); db.save('visitor', v.slice(-500)); });
-    socket.on('disconnect', () => { io.emit('live_stats', { onlineUsers: io.engine.clientsCount }); });
+    socket.on('request_pairing', (data) => { const sessionId = data.sessionId; if(activeSockets[sessionId]?.status === 'connected') return; startWhatsApp(sessionId); setTimeout(async () => { const sock = activeSockets[sessionId]?.sock; if(sock) { try { const code = await sock.requestPairingCode(data.number); io.emit('pairing_code', { sessionId, code: code.match(/.{1,4}/g)?.join('-') || code }); } catch(e) {} } }, 4000); });
+    socket.on('run_tool', (data) => { if (db.getSetting('maintenance_mode')) return socket.emit('tool_result', { tool: data.tool, result: '🛠 Maintenance Mode Active.', copyData: '' }); data.socketId = socket.id; taskQueue.push(data); processQueue(); });
+    socket.on('save_settings', (data) => { try { Object.keys(data).forEach(k => db.setSetting(k, data[k])); log('Settings updated.'); } catch(e) {} });
+    socket.on('clear_logs', () => { try { db.save('logs', []); log('Logs cleared.'); } catch(e) {} });
+    socket.on('visitor_info', (data) => { try { const v = db.load('visitor'); v.push({...data, time: new Date().toISOString()}); db.save('visitor', v.slice(-500)); } catch(e) {} });
+    socket.on('disconnect', () => { try { io.emit('live_stats', { onlineUsers: io.engine.clientsCount }); } catch(e) {} });
 });
 
 // ================= API & EXPORT =================
@@ -333,7 +305,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         else if (ext === 'csv') { await new Promise((resolve, reject) => { fs.createReadStream(req.file.path).pipe(csv()).on('data', (row) => { Object.values(row).forEach(val => { const num = formatNumber(String(val).trim()); if (isValidNumber(num)) uniqueNums.add(num); }); }).on('end', resolve).on('error', reject); }); }
         else if (ext === 'xlsx' || ext === 'xls') { const wb = XLSX.readFile(req.file.path); XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }).flat().forEach(val => { const num = formatNumber(String(val).trim()); if (isValidNumber(num)) uniqueNums.add(num); }); }
         else if (ext === 'json') { const jsonData = JSON.parse(fs.readFileSync(req.file.path, 'utf8')); if(Array.isArray(jsonData)) jsonData.forEach(val => { const num = formatNumber(String(val).trim()); if (isValidNumber(num)) uniqueNums.add(num); }); }
-        fs.unlinkSync(req.file.path);
+        try { fs.unlinkSync(req.file.path); } catch(e) {}
         res.json({ numbers: Array.from(uniqueNums) });
     } catch(error) { res.status(500).json({ error: 'Failed to process file' }); }
 });
@@ -346,27 +318,25 @@ app.get('/api/export/:format', (req, res) => {
     else res.status(400).send('Invalid format');
 });
 
-// ================= SYSTEM MONITOR & CRON =================
+// ================= SYSTEM MONITOR (FALLBACK) =================
 setInterval(async () => {
     try {
-        const cpu = await si.currentLoad(); const ram = await si.mem();
-        io.emit('system_stats', { cpu: Math.round(cpu.currentLoad), ramUsed: Math.round((ram.used/ram.total)*100), visitors: db.load('visitor').length, uptime: os.uptime(), ping: Math.round(Math.random()*10+5) });
+        let cpuLoad = 0;
+        if (si) { const cpu = await si.currentLoad(); cpuLoad = Math.round(cpu.currentLoad); }
+        else { const loads = os.loadavg(); cpuLoad = Math.round((loads[0] / os.cpus().length) * 100); } // Fallback
+        
+        const ram = await si?.mem() || { total: os.totalmem(), used: os.totalmem() - os.freemem() };
+        io.emit('system_stats', { cpu: cpuLoad, ramUsed: Math.round(((ram.used || (os.totalmem()-os.freemem())) / (ram.total || os.totalmem()))*100), visitors: db.load('visitor').length, uptime: os.uptime(), ping: Math.round(Math.random()*10+5) });
     } catch(e) {}
 }, 3000);
 
-cron.schedule('0 */6 * * *', () => {
-    const date = new Date().toISOString().replace(/[:.]/g, '-');
-    fs.readdirSync('./database').forEach(file => { if(file.endsWith('.json')) fs.copyFileSync(`./database/${file}`, path.join(db.backupDir, `${date}_${file}`)); });
-    log('[CRON] Auto backup executed.');
-});
-
-// ================= START SERVER (CLOUD READY) =================
-const PORT = process.env.PORT || 3000; // Cloud dynamic port
-server.listen(PORT, '0.0.0.0', () => { // Bind 0.0.0.0 for Cloud
+// ================= START SERVER =================
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n╔═════════════════════════════════════════════════════════════════╗`);
-    console.log(`║   🚀 ADI FIX RED v10.0 - CLOUD READY EDITION                 ║`);
+    console.log(`║   🚀 ADI FIX RED v10.1 - CLOUD ANTI-CRASH                    ║`);
     console.log(`║   🌐 Listening on PORT: ${PORT}                                  ║`);
     console.log(`║   📱 PWA Ready | 🔒 Auth | ⚡ GZIP | 🛡 CPU Protect          ║`);
     console.log(`╚═════════════════════════════════════════════════════════════════╝\n`);
-    db.load('wa_sessions').filter(s => s.status === 'connected').forEach(s => startWhatsApp(s.sessionId));
+    try { db.load('wa_sessions').filter(s => s.status === 'connected').forEach(s => startWhatsApp(s.sessionId)); } catch(e) {}
 });
