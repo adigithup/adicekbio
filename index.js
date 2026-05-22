@@ -30,8 +30,16 @@ const io = new Server(server);
 
 // GZIP Compression & Cache
 app.use(compression());
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1d' }));
+
+// FIX: static file (karena index.html kamu ada di ROOT, bukan /public)
+app.use(express.static(__dirname, { maxAge: '1d' }));
+
 app.use(express.json());
+
+// FIX: route utama "/"
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // Rate Limit & API Protection
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: { error: 'Too many requests.' } });
