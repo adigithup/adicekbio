@@ -26,8 +26,6 @@
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #1a2342; border-radius: 4px; }
         @keyframes spin2 { to { transform: rotate(360deg); } } .spinner2 { animation: spin2 1s linear infinite; }
         @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } } .float-anim { animation: float 3s ease-in-out infinite; }
-        
-        /* Lightweight CSS Background instead of heavy Particles */
         .grid-bg { background-image: radial-gradient(rgba(0, 212, 255, 0.1) 1px, transparent 1px); background-size: 30px 30px; }
     </style>
 </head>
@@ -101,7 +99,7 @@
         <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
             
             <!-- DASHBOARD -->
-            <div x-show="currentPage === 'dashboard'" class="space-y-6">
+            <div x-show="currentPage === 'dashboard'" class="space-y-6" x-cloak>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div class="glass-card p-4 rounded-xl neon-border-blue float-anim"><p class="text-[10px] text-gray-400 uppercase">Process</p><p class="text-2xl font-bold text-white">1,245</p></div>
                     <div class="glass-card p-4 rounded-xl neon-border-green float-anim" style="animation-delay: 0.2s"><p class="text-[10px] text-gray-400 uppercase">Online</p><p class="text-2xl font-bold text-neon-green" x-text="liveStats.onlineUsers"></p></div>
@@ -118,7 +116,7 @@
             </div>
 
             <!-- WA CONNECTION -->
-            <div x-show="currentPage === 'connection'" class="max-w-lg mx-auto space-y-4">
+            <div x-show="currentPage === 'connection'" class="max-w-lg mx-auto space-y-4" x-cloak>
                 <div class="glass-card p-4 rounded-xl neon-border-blue flex justify-between items-center">
                     <h3 class="font-bold text-sm text-white">Session Manager</h3>
                     <div class="flex gap-2">
@@ -145,7 +143,7 @@
             </div>
 
             <!-- WA TOOLS -->
-            <div x-show="currentPage === 'tools'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div x-show="currentPage === 'tools'" class="grid grid-cols-1 md:grid-cols-2 gap-4" x-cloak>
                 <div class="glass-card p-5 rounded-xl neon-border-blue">
                     <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-id-badge text-neon-blue mr-2"></i>Cek Bio WA</h3>
                     <div class="mb-3 border-2 border-dashed border-dark-600 rounded-lg p-4 text-center cursor-pointer" @click="$refs.fileInputBio.click()">
@@ -185,7 +183,7 @@
             </div>
 
             <!-- FIX & BANDING -->
-            <div x-show="currentPage === 'fix'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div x-show="currentPage === 'fix'" class="grid grid-cols-1 md:grid-cols-2 gap-4" x-cloak>
                 <div class="glass-card p-5 rounded-xl neon-border-yellow">
                     <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-envelope text-neon-yellow mr-2"></i>Fix Merah</h3>
                     <input type="text" x-model="fixNumber" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-3 text-xs mb-3 outline-none" placeholder="628xxx">
@@ -203,7 +201,7 @@
             </div>
 
             <!-- SETTINGS -->
-            <div x-show="currentPage === 'settings'" class="max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div x-show="currentPage === 'settings'" class="max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4" x-cloak>
                 <div class="glass-card p-5 rounded-xl neon-border-blue space-y-3">
                     <h3 class="font-bold text-white text-sm"><i class="fas fa-cog text-neon-blue mr-2"></i>System Config</h3>
                     <input type="email" x-model="setEmail" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Email SMTP">
@@ -226,16 +224,7 @@
 
 <script>
 function playSound(type) {
-    try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        gain.gain.value = 0.1;
-        osc.frequency.value = type === 'success' ? 900 : 300;
-        osc.type = 'sine';
-        osc.start(); osc.stop(ctx.currentTime + 0.15);
-    } catch(e) {}
+    try { const ctx = new (window.AudioContext || window.webkitAudioContext)(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.connect(gain); gain.connect(ctx.destination); gain.gain.value = 0.1; osc.frequency.value = type === 'success' ? 900 : 300; osc.type = 'sine'; osc.start(); osc.stop(ctx.currentTime + 0.15); } catch(e) {}
 }
 
 function app() {
@@ -243,11 +232,10 @@ function app() {
         currentPage: 'dashboard', sidebarOpen: false, isAuthenticated: false, authPassword: '', isServerOnline: true,
         pairInput: '', toolInput: '', toolResult: '', copyData: '', fixNumber: '', searchResult: '',
         setEmail: '', setPass: '', setDelay: '1000', setCooldown: '5', setTgChannel: '', setTgGroup: '', setAuthPass: '',
-        isLoading: false, loadingText: '', progress: { current: 0, total: 0, eta: '0s' },
+        isLoading: false, progress: { current: 0, total: 0, eta: '0s' },
         logs: [], socket: null, sysStats: { cpu: 0, ramUsed: 0, visitors: 0, uptime: 0, ping: 0 }, liveStats: { onlineUsers: 0 },
         toast: { show: false, type: 'success', title: '', msg: '', timer: null },
-        activeSession: 'default_admin',
-        waStatus: {}, sessions: [], settings: {}, lastToolRun: 0,
+        activeSession: 'default_admin', waStatus: {}, sessions: [], settings: {}, lastToolRun: 0,
         
         menuItems: [
             { id: 'dashboard', label: 'Dashboard', icon: 'fas fa-chart-line' },
@@ -257,20 +245,17 @@ function app() {
             { id: 'settings', label: 'Settings', icon: 'fas fa-cog' }
         ],
         get currentPageTitle() { return this.menuItems.find(i => i.id === this.currentPage)?.label || ''; },
-        get filteredResult() { 
-            if(!this.searchResult) return this.toolResult;
-            return this.toolResult.split('\n').filter(line => line.toLowerCase().includes(this.searchResult.toLowerCase())).join('\n');
-        },
+        get filteredResult() { if(!this.searchResult) return this.toolResult; return this.toolResult.split('\n').filter(line => line.toLowerCase().includes(this.searchResult.toLowerCase())).join('\n'); },
 
         init() {
+            // Auto connect socket to current domain (Perfect for Pxxl/Cloud)
             this.socket = io();
             
             this.socket.on('connect', () => { this.isServerOnline = true; });
             this.socket.on('disconnect', () => { this.isServerOnline = false; });
 
             this.socket.on('init_data', (data) => {
-                this.settings = data.settings;
-                this.sessions = data.sessions;
+                this.settings = data.settings; this.sessions = data.sessions;
                 if(this.sessions.length > 0 && !this.sessions.find(s => s.sessionId === this.activeSession)) this.activeSession = this.sessions[0].sessionId;
                 if(data.settings.auth_password && data.settings.auth_password !== '') this.isAuthenticated = false;
                 else this.isAuthenticated = true;
@@ -278,32 +263,15 @@ function app() {
                 data.sessions.forEach(s => { if(!this.waStatus[s.sessionId]) this.waStatus[s.sessionId] = {}; this.waStatus[s.sessionId].status = s.status; });
             });
 
-            this.socket.on('log', (msg) => {
-                this.logs.push({ time: new Date().toLocaleTimeString(), msg });
-                if (this.logs.length > 150) this.logs.shift();
-                this.$nextTick(() => { if (this.$refs.logContainer) this.$refs.logContainer.scrollTop = this.$refs.logContainer.scrollHeight; });
-            });
-
-            this.socket.on('wa_status', (data) => {
-                if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {};
-                this.waStatus[data.sessionId].status = data.status;
-                if(data.number) this.waStatus[data.sessionId].number = data.number;
-                if(data.status === 'connected') { this.isLoading = false; playSound('success'); this.showToast('success', 'Connected!', `WA ${data.sessionId} Online`); }
-                if(data.status === 'disconnected' && this.waStatus[data.sessionId]?.number) { playSound('error'); this.showToast('error', 'Disconnected!', `WA ${data.sessionId} Offline`); }
-            });
+            this.socket.on('log', (msg) => { this.logs.push({ time: new Date().toLocaleTimeString(), msg }); if (this.logs.length > 150) this.logs.shift(); this.$nextTick(() => { if (this.$refs.logContainer) this.$refs.logContainer.scrollTop = this.$refs.logContainer.scrollHeight; }); });
+            this.socket.on('wa_status', (data) => { if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {}; this.waStatus[data.sessionId].status = data.status; if(data.number) this.waStatus[data.sessionId].number = data.number; if(data.status === 'connected') { this.isLoading = false; playSound('success'); this.showToast('success', 'Connected!', `WA ${data.sessionId} Online`); } if(data.status === 'disconnected' && this.waStatus[data.sessionId]?.number) { playSound('error'); this.showToast('error', 'Disconnected!', `WA ${data.sessionId} Offline`); } });
             this.socket.on('qr', (data) => { if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {}; this.waStatus[data.sessionId].qr = data.qr; this.waStatus[data.sessionId].pairing = null; this.isLoading = false; });
             this.socket.on('pairing_code', (data) => { if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {}; this.waStatus[data.sessionId].pairing = data.code; this.waStatus[data.sessionId].qr = null; this.isLoading = false; });
-            
             this.socket.on('progress', (data) => { this.progress = data; });
             this.socket.on('system_stats', (stats) => { this.sysStats = stats; });
             this.socket.on('live_stats', (stats) => { this.liveStats = stats; });
+            this.socket.on('tool_result', (data) => { this.toolResult = data.result; this.copyData = data.copyData || ''; this.isLoading = false; this.progress = { current: 0, total: 0, eta: '0s' }; this.showToast('success', 'Done!', 'Process finished.'); playSound('success'); });
 
-            this.socket.on('tool_result', (data) => {
-                this.toolResult = data.result; this.copyData = data.copyData || ''; this.isLoading = false; this.progress = { current: 0, total: 0, eta: '0s' };
-                this.showToast('success', 'Done!', `Process finished.`); playSound('success');
-            });
-
-            // Init Chart
             const ctx = document.getElementById('statsChart')?.getContext('2d');
             if(ctx) new Chart(ctx, { type: 'line', data: { labels: ['1','2','3','4','5'], datasets: [{ label: 'Process', data: [12, 19, 3, 5, 2], borderColor: '#00d4ff', tension: 0.1 }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
         },
@@ -314,33 +282,13 @@ function app() {
         copyResults() { navigator.clipboard.writeText(this.copyData).then(() => { this.showToast('success', 'Copied!', ''); playSound('success'); }); },
         exportData(format) { window.open(`/api/export/${format}?data=${encodeURIComponent(this.copyData)}`, '_blank'); },
         clearLogs() { this.logs = []; this.socket.emit('clear_logs'); },
-
         addSession() { const id = prompt("Enter Session ID (e.g., user_3):"); if(id && !this.sessions.find(s=>s.sessionId===id)) { this.sessions.push({sessionId: id, status: 'disconnected'}); this.activeSession = id; this.waStatus[id] = {status:'disconnected'}; } },
         deleteSession() { if(confirm(`Delete ${this.activeSession}?`)) { this.socket.emit('disconnect_wa', { sessionId: this.activeSession, delete: true }); this.sessions = this.sessions.filter(s=>s.sessionId !== this.activeSession); this.activeSession = this.sessions[0]?.sessionId || 'default_admin'; } },
-
-        async handleFileUpload(event) {
-            const file = event.target.files[0]; if (!file) return;
-            const formData = new FormData(); formData.append('file', file);
-            try { const res = await fetch('/api/upload', { method: 'POST', body: formData }); const data = await res.json(); if(data.numbers) { this.toolInput = data.numbers.join('\n'); this.showToast('success', 'Loaded', `${data.numbers.length} valid numbers`); } else this.showToast('error', 'Error', 'Invalid file'); } catch(e) { this.showToast('error', 'Error', 'Upload failed'); }
-        },
-
+        async handleFileUpload(event) { const file = event.target.files[0]; if (!file) return; const formData = new FormData(); formData.append('file', file); try { const res = await fetch('/api/upload', { method: 'POST', body: formData }); const data = await res.json(); if(data.numbers) { this.toolInput = data.numbers.join('\n'); this.showToast('success', 'Loaded', `${data.numbers.length} valid numbers`); } else this.showToast('error', 'Error', 'Invalid file'); } catch(e) { this.showToast('error', 'Error', 'Upload failed'); } },
         reqPairing() { if (!this.pairInput) return; this.isLoading = true; this.socket.emit('request_pairing', { sessionId: this.activeSession, number: this.pairInput }); },
         reqQR() { this.isLoading = true; this.socket.emit('request_qr', { sessionId: this.activeSession }); },
         disconnectWA(del = false) { this.socket.emit('disconnect_wa', { sessionId: this.activeSession, delete: del }); },
-
-        runTool(tool) {
-            if (this.isLoading) return; // Anti double click
-            const now = Date.now();
-            if (now - this.lastToolRun < (this.setCooldown * 1000)) return this.showToast('error', 'Cooldown', 'Wait a moment...');
-            this.lastToolRun = now;
-
-            if (!this.toolInput && (tool === 'cekbio' || tool === 'ceknom')) return this.showToast('error', 'Error', 'No input!');
-            if (!this.fixNumber && (tool === 'fix' || tool === 'banding')) return this.showToast('error', 'Error', 'No target!');
-            
-            this.isLoading = true; this.loadingText = `Running ${tool}...`; this.toolResult = 'Queued...'; this.copyData = ''; this.progress = { current: 0, total: 0, eta: '0s' };
-            this.socket.emit('run_tool', { tool, payload: { numbers: this.toolInput, number: this.fixNumber, sessionId: this.activeSession } });
-        },
-
+        runTool(tool) { if (this.isLoading) return; const now = Date.now(); if (now - this.lastToolRun < (this.setCooldown * 1000)) return this.showToast('error', 'Cooldown', 'Wait...'); this.lastToolRun = now; if (!this.toolInput && (tool === 'cekbio' || tool === 'ceknom')) return this.showToast('error', 'Error', 'No input!'); if (!this.fixNumber && (tool === 'fix' || tool === 'banding')) return this.showToast('error', 'Error', 'No target!'); this.isLoading = true; this.toolResult = 'Queued...'; this.copyData = ''; this.progress = { current: 0, total: 0, eta: '0s' }; this.socket.emit('run_tool', { tool, payload: { numbers: this.toolInput, number: this.fixNumber, sessionId: this.activeSession } }); },
         saveConfig() { this.socket.emit('save_settings', { active_email: this.setEmail, active_pass: this.setPass, tg_channel: this.setTgChannel, tg_group: this.setTgGroup, auth_password: this.setAuthPass }); this.showToast('success', 'Saved', 'Config updated'); },
         saveLimits() { this.socket.emit('save_settings', { check_delay: this.setDelay, cooldown_time: this.setCooldown * 1000 }); this.showToast('success', 'Saved', 'Performance updated'); }
     }

@@ -1,7 +1,7 @@
 {
   "name": "adi-fix-red-ultimate",
-  "version": "9.0.0",
-  "description": "Final Ultimate Multi-Session WhatsApp Tools",
+  "version": "10.0.0",
+  "description": "Cloud Ready Ultimate Multi-Session WhatsApp Tools",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

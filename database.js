@@ -12,6 +12,7 @@ const files = {
     wa_sessions: path.join(dbDir, 'wa_sessions.json'),
 };
 
+// Auto create folder database
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
 
@@ -20,9 +21,7 @@ const defaultData = {
         check_delay: 1000, cooldown_time: 10000, 
         active_email: 'your_email@gmail.com', active_pass: 'your_app_pass', 
         tg_channel: 'https://t.me/ADifixredChannel', tg_group: 'https://t.me/ADifixredGroup',
-        auth_password: '', // Empty = no password
-        maintenance_mode: false,
-        max_wa_sessions: 5
+        auth_password: '', maintenance_mode: false, max_wa_sessions: 5
     },
     history: [], logs: [], visitor: [], wa_sessions: []
 };
