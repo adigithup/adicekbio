@@ -1,342 +1,298 @@
-// ══════════════════════════════════════════════════════════════════════════════
-// 🚀 ADI FIX RED v10.1 [CLOUD ANTI-CRASH EDITION]
-// ⚡ Express + GZIP + Socket.io + Queue + Fallback Monitor
-// ══════════════════════════════════════════════════════════════════════════════
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ADI FIX RED - Ultimate</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#050816">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = { theme: { extend: { colors: { dark: { 900: '#050816', 800: '#0a0f1e', 700: '#111834', 600: '#1a2342' }, neon: { blue: '#00d4ff', green: '#00ff9d', purple: '#bd00ff', red: '#ff0055', yellow: '#ffe600' } } } } }
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #050816; overflow: hidden; }
+        .glass-card { background: rgba(17, 24, 52, 0.6); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.05); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); }
+        .neon-border-blue { border: 1px solid rgba(0, 212, 255, 0.3); box-shadow: 0 0 15px rgba(0, 212, 255, 0.1); }
+        .neon-border-green { border: 1px solid rgba(0, 255, 157, 0.3); box-shadow: 0 0 15px rgba(0, 255, 157, 0.1); }
+        .neon-border-purple { border: 1px solid rgba(189, 0, 255, 0.3); box-shadow: 0 0 15px rgba(189, 0, 255, 0.1); }
+        .neon-border-yellow { border: 1px solid rgba(255, 230, 0, 0.3); box-shadow: 0 0 15px rgba(255, 230, 0, 0.1); }
+        .btn-glow:hover { transform: translateY(-2px); filter: brightness(1.2); }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #1a2342; border-radius: 4px; }
+        @keyframes spin2 { to { transform: rotate(360deg); } } .spinner2 { animation: spin2 1s linear infinite; }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } } .float-anim { animation: float 3s ease-in-out infinite; }
+        .grid-bg { background-image: radial-gradient(rgba(0, 212, 255, 0.1) 1px, transparent 1px); background-size: 30px 30px; }
+    </style>
+</head>
+<body class="text-gray-200 h-screen overflow-hidden flex flex-col md:flex-row grid-bg">
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const compression = require('compression');
-const path = require('path');
-const fs = require('fs');
-const qrcode = require('qrcode');
-const nodemailer = require('nodemailer');
-const multer = require('multer');
-const csv = require('csv-parser');
-const XLSX = require('xlsx');
-const os = require('os');
-const rateLimit = require('express-rate-limit');
-const { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
-const P = require("pino");
-const db = require('./database');
-
-// Safe load systeminformation (Anti Crash for Alpine/Cloud)
-let si = null;
-try { si = require('systeminformation'); } catch(e) { console.log('[WARN] systeminformation failed to load, using fallback.'); }
-
-const app = express();
-const server = http.createServer(app);
-
-// Config Socket.io for Cloud Proxy
-const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
-  transports: ['websocket', 'polling'],
-  allowEIO3: true
-});
-
-app.use(compression());
-app.use(express.json());
-
-// ================= ROUTING (MUST BE BEFORE ERROR HANDLER) =================
-// Serve index.html directly from ROOT directory
-app.get('/', (req, res) => {
-    try {
-        const indexPath = path.join(__dirname, 'index.html');
-        if (fs.existsSync(indexPath)) {
-            res.sendFile(indexPath);
-        } else {
-            res.status(200).send('<h1>Error</h1><p>File index.html tidak ditemukan di root folder!</p>');
-        }
-    } catch(e) {
-        res.status(500).send('Internal Server Error loading page');
-    }
-});
-
-// Health Check Route for Cloud
-app.get('/health', (req, res) => res.status(200).send('OK'));
-
-// Rate Limit
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, message: { error: 'Too many requests.' } });
-app.use('/api/', limiter);
-const upload = multer({ dest: 'uploads/', limits: { fileSize: 5 * 1024 * 1024 } });
-
-// ================= GLOBAL STATE & QUEUE =================
-let activeSockets = {}; 
-let taskQueue = [];
-let isProcessingQueue = false;
-
-// ================= UTILS & VALIDATION =================
-function formatNumber(raw) {
-    let n = raw.replace(/\D/g, '');
-    if (n.startsWith('0')) n = '62' + n.substring(1);
-    else if (n.startsWith('8')) n = '62' + n;
-    return n;
-}
-function isValidNumber(n) { return n.length >= 10 && n.length <= 15; }
-
-function log(message, sessionId = 'SYSTEM') {
-    const time = new Date().toLocaleTimeString();
-    console.log(`[${time}][${sessionId}] ${message}`);
-    try {
-        io.emit('log', message);
-        const logs = db.load('logs');
-        logs.push({ time, sessionId, message });
-        db.save('logs', logs.slice(-200));
-    } catch(e) {}
-}
-
-// ================= MULTI-SESSION WHATSAPP =================
-async function startWhatsApp(sessionId) {
-    const maxSessions = db.getSetting('max_wa_sessions') || 5;
-    const sessions = db.load('wa_sessions');
-    if (sessions.length >= maxSessions && !sessions.find(s => s.sessionId === sessionId)) {
-        return log(`Max session limit reached (${maxSessions})`, sessionId);
-    }
-
-    if (activeSockets[sessionId]?.status === 'connecting') return;
-    if (!activeSockets[sessionId]) activeSockets[sessionId] = { sock: null, status: 'disconnected' };
+<div x-data="app()" class="flex h-full w-full overflow-hidden relative">
     
-    activeSockets[sessionId].status = 'connecting';
-    io.emit('wa_status', { sessionId, status: 'connecting' });
-    log('Starting WhatsApp connection...', sessionId);
+    <!-- LOGIN GATE -->
+    <div x-show="!isAuthenticated" class="fixed inset-0 bg-dark-900 z-[999] flex items-center justify-center">
+        <div class="glass-card p-8 rounded-2xl neon-border-blue w-full max-w-sm text-center">
+            <i class="fas fa-lock text-4xl text-neon-blue mb-4"></i>
+            <h2 class="text-xl font-bold text-white mb-4">System Locked</h2>
+            <input type="password" x-model="authPassword" @keydown.enter="login()" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-neon-blue mb-4" placeholder="Enter Password...">
+            <button @click="login()" class="w-full bg-neon-blue text-dark-900 py-3 rounded-xl font-bold btn-glow">Unlock</button>
+        </div>
+    </div>
 
-    const authDir = path.join('./database/sessions', sessionId);
-    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
+    <!-- RECONNECT OVERLAY -->
+    <div x-show="!isServerOnline" class="fixed inset-0 bg-dark-900/90 z-[900] flex items-center justify-center">
+        <div class="text-center"><i class="fas fa-wifi text-4xl text-neon-red mb-3"></i><p class="text-white font-bold">Reconnecting to Server...</p></div>
+    </div>
 
-    try {
-        const { state, saveCreds } = await useMultiFileAuthState(authDir);
-        const { version } = await fetchLatestBaileysVersion();
+    <!-- MOBILE SIDEBAR OVERLAY -->
+    <div x-show="sidebarOpen" @click="sidebarOpen = false" class="fixed inset-0 bg-black/50 z-30 md:hidden transition-opacity"></div>
 
-        const sock = makeWASocket({
-            version, auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, P({ level: "fatal" })) },
-            printQRInTerminal: false, logger: P({ level: 'silent' }),
-            browser: ['ADI FIX RED', 'Chrome', '10.1'], connectTimeoutMs: 60000,
-        });
+    <!-- SIDEBAR -->
+    <div :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed md:relative z-40 md:translate-x-0 w-72 h-full glass-card border-r border-dark-600 flex flex-col transition-transform duration-300 ease-in-out content-layer">
+        <div class="p-6 border-b border-dark-600 flex justify-between items-center">
+            <h1 class="text-xl font-black tracking-wider text-white flex items-center gap-2"><i class="fas fa-bolt text-neon-blue"></i> ADI FIX RED</h1>
+            <button @click="sidebarOpen = false" class="md:hidden text-gray-400"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="flex-1 p-4 space-y-2 overflow-y-auto">
+            <template x-for="item in menuItems" :key="item.id">
+                <button @click="currentPage = item.id; sidebarOpen = false" :class="currentPage === item.id ? 'bg-neon-blue/10 text-neon-blue neon-border-blue' : 'text-gray-400 hover:bg-dark-600 hover:text-white'" class="w-full text-left p-3.5 rounded-xl transition-all duration-300 flex items-center space-x-3 text-sm font-semibold btn-glow">
+                    <i :class="item.icon" class="w-5 text-center text-base"></i> <span x-text="item.label"></span>
+                </button>
+            </template>
+        </div>
+        <div class="p-4 border-t border-dark-600 space-y-2 text-[10px]">
+            <div class="flex justify-between"><span class="text-gray-400">CPU</span><span class="text-neon-blue" x-text="sysStats.cpu + '%'"></span></div>
+            <div class="w-full bg-dark-700 rounded-full h-1.5"><div class="bg-neon-blue h-1.5 rounded-full" :style="`width: ${sysStats.cpu}%`"></div></div>
+            <div class="flex justify-between"><span class="text-gray-400">RAM</span><span class="text-neon-green" x-text="sysStats.ramUsed + '%'"></span></div>
+            <div class="w-full bg-dark-700 rounded-full h-1.5"><div class="bg-neon-green h-1.5 rounded-full" :style="`width: ${sysStats.ramUsed}%`"></div></div>
+            <div class="flex justify-between"><span class="text-gray-400">Ping</span><span class="text-neon-yellow" x-text="sysStats.ping + 'ms'"></span></div>
+            <a :href="settings.tg_channel" target="_blank" class="block text-neon-blue hover:text-white mt-2"><i class="fab fa-telegram"></i> Channel</a>
+            <a :href="settings.tg_group" target="_blank" class="block text-neon-purple hover:text-white"><i class="fab fa-telegram-plane"></i> Grup</a>
+        </div>
+    </div>
 
-        activeSockets[sessionId].sock = sock;
-
-        sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            if (qr) {
-                try {
-                    const qrImage = await qrcode.toDataURL(qr, { width: 300, margin: 2 });
-                    io.emit('qr', { sessionId, qr: qrImage });
-                    log('QR Code generated.', sessionId);
-                } catch(e) {}
-            }
-            if (connection === 'close') {
-                activeSockets[sessionId].status = 'disconnected';
-                io.emit('wa_status', { sessionId, status: 'disconnected' });
-                updateSessionDb(sessionId, 'disconnected');
-                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-                log(`Disconnected. Reconnect: ${shouldReconnect}`, sessionId);
-                if (shouldReconnect) setTimeout(() => startWhatsApp(sessionId), 5000);
-                else { try { if (fs.existsSync(authDir)) fs.rmSync(authDir, { recursive: true, force: true }); } catch(e) {} log('Session logged out.', sessionId); }
-            }
-            if (connection === 'open') {
-                activeSockets[sessionId].status = 'connected';
-                io.emit('wa_status', { sessionId, status: 'connected', number: sock.user?.id, name: sock.user?.name });
-                updateSessionDb(sessionId, 'connected', sock.user?.id, sock.user?.name);
-                log(`WhatsApp Connected as ${sock.user?.id}`, sessionId);
-            }
-        });
-        sock.ev.on('creds.update', saveCreds);
-    } catch(error) {
-        log('WA Error: ' + error.message, sessionId);
-        activeSockets[sessionId].status = 'disconnected';
-        io.emit('wa_status', { sessionId, status: 'disconnected' });
-    }
-}
-
-function disconnectWhatsApp(sessionId, deleteSession = false) {
-    const session = activeSockets[sessionId];
-    if (session?.sock) {
-        try { session.sock.end(new Error('Manual disconnect')); } catch(e) {}
-        const authDir = path.join('./database/sessions', sessionId);
-        if (deleteSession && fs.existsSync(authDir)) try { fs.rmSync(authDir, { recursive: true, force: true }); } catch(e) {}
-    }
-    activeSockets[sessionId] = { sock: null, status: 'disconnected' };
-    io.emit('wa_status', { sessionId, status: 'disconnected' });
-    
-    if (deleteSession) {
-        let sessions = db.load('wa_sessions');
-        db.save('wa_sessions', sessions.filter(s => s.sessionId !== sessionId));
-        log('Session deleted.', sessionId);
-    } else {
-        updateSessionDb(sessionId, 'disconnected');
-        log('WhatsApp Disconnected manually.', sessionId);
-    }
-}
-
-function updateSessionDb(sessionId, status, number = null, name = null) {
-    try {
-        let sessions = db.load('wa_sessions');
-        const idx = sessions.findIndex(s => s.sessionId === sessionId);
-        if (idx !== -1) {
-            sessions[idx].status = status;
-            if(number) sessions[idx].waNumber = number;
-            if(name) sessions[idx].pushName = name;
-        } else {
-            sessions.push({ sessionId, status, waNumber: number, pushName: name, createdAt: new Date().toISOString() });
-        }
-        db.save('wa_sessions', sessions);
-    } catch(e) {}
-}
-
-// ================= QUEUE & CPU PROTECTION =================
-async function processQueue() {
-    if (isProcessingQueue || taskQueue.length === 0) return;
-    isProcessingQueue = true;
-    const task = taskQueue.shift();
-    try {
-        const result = await executeTool(task.socketId, task.tool, task.payload);
-        io.to(task.socketId).emit('tool_result', result);
-    } catch(error) {
-        io.to(task.socketId).emit('tool_result', { tool: task.tool, result: 'Server Error: ' + error.message, copyData: '' });
-    }
-    isProcessingQueue = false;
-    processQueue();
-}
-
-async function executeTool(socketId, tool, payload) {
-    const sessionId = payload.sessionId || 'default_admin';
-    const sock = activeSockets[sessionId]?.sock;
-    if (!sock && tool !== 'banding') return { tool, result: `WhatsApp session ${sessionId} not connected!`, copyData: '' };
-
-    const checkDelay = parseInt(db.getSetting('check_delay')) || 1000;
-
-    if (tool === 'cekbio') {
-        let numSet = new Set();
-        if (payload.numbers) payload.numbers.split(/[\s,\n]+/).filter(Boolean).map(formatNumber).filter(isValidNumber).forEach(n => numSet.add(n));
-        const numbers = Array.from(numSet);
-        if (numbers.length === 0) return { tool, result: 'No valid numbers!', copyData: '' };
-
-        let stats = { total: numbers.length, registered: 0, notRegistered: 0, withBio: 0, withoutBio: 0, businessMeta: 0, exclusive: 0, standard: 0, low: 0, suite: 0, yearSet: {} };
-        let copyData = '';
-        let startTime = Date.now();
-
-        for (let i = 0; i < numbers.length; i++) {
-            const num = numbers[i];
-            try {
-                const [check] = await sock.onWhatsApp(num + '@s.whatsapp.net');
-                if (!check?.exists) { stats.notRegistered++; continue; }
-                stats.registered++;
-                
-                let bio = '', setAt = null, isBusiness = false;
-                try { 
-                    const s = await sock.fetchStatus(num + '@s.whatsapp.net'); 
-                    if (s?.[0]?.status?.status) { bio = s[0].status.status; stats.withBio++; }
-                    else { stats.withoutBio++; }
-                    if(s?.[0]?.status?.setAt) setAt = new Date(s[0].status.setAt);
-                } catch(e) { stats.withoutBio++; }
-
-                try {
-                    const bp = await sock.getBusinessProfile(num + '@s.whatsapp.net');
-                    if(bp) { isBusiness = true; stats.businessMeta++; if(bp.options?.length > 2) stats.suite++; else if(bp.description?.length > 100) stats.exclusive++; else if(bp.description?.length > 0) stats.standard++; else stats.low++; }
-                } catch(e) {}
-
-                if(setAt) { const year = setAt.getFullYear(); stats.yearSet[year] = (stats.yearSet[year] || 0) + 1; }
-                copyData += `${num}|${bio}|${isBusiness ? 'Business' : 'Personal'}|${setAt ? setAt.getFullYear() : 'N/A'}\n`;
-                
-                const elapsed = Date.now() - startTime;
-                const eta = Math.round(((numbers.length - (i+1)) * (elapsed / (i+1))) / 1000);
-                io.emit('progress', { current: i+1, total: numbers.length, eta: eta + 's' });
-                await new Promise(r => setTimeout(r, checkDelay));
-            } catch(e) { stats.notRegistered++; }
-        }
-
-        let resultText = `📊 STATISTIK RINGKASAN:\n├ Terdaftar WA: ${stats.registered}\n├ Tidak Terdaftar WA: ${stats.notRegistered}\n├ Memiliki Bio: ${stats.withBio}\n├ Tanpa Bio: ${stats.withoutBio}\n├ Business Meta: ${stats.businessMeta}\n│  ├ Eklusif: ${stats.exclusive}\n│  ├ Standart: ${stats.standard}\n│  ├ Low: ${stats.low}\n│  └ Suite: ${stats.suite}\n\n📅 STATISTIK BIO BERDASARKAN TAHUN SET:\n`;
-        Object.keys(stats.yearSet).sort().forEach(year => { resultText += `├ ${year}: ${stats.yearSet[year]} nomor\n`; });
-        resultText += `\n═════════════════════════\n\nDETAILED LOG:\n\n` + copyData.replace(/\|/g, ' | ');
-        return { tool, result: resultText, copyData };
-    } 
-    else if (tool === 'ceknom') {
-        let reg = [], nreg = []; let numSet = new Set();
-        if (payload.numbers) payload.numbers.split(/[\s,\n]+/).filter(Boolean).map(formatNumber).filter(isValidNumber).forEach(n => numSet.add(n));
-        const numbers = Array.from(numSet); let startTime = Date.now();
-        for (let i = 0; i < numbers.length; i += 20) {
-            const batch = numbers.slice(i, i + 20);
-            const res = await Promise.all(batch.map(async n => { try { const [c] = await sock.onWhatsApp(n + '@s.whatsapp.net'); return { n, ok: !!c?.exists }; } catch(e) { return { n, ok: false }; } }));
-            res.forEach(r => (r.ok ? reg : nreg).push(r.n));
-            const elapsed = Date.now() - startTime;
-            const eta = Math.round(((numbers.length - (i+20)) * (elapsed / (i+20))) / 1000);
-            io.emit('progress', { current: Math.min(i+20, numbers.length), total: numbers.length, eta: eta + 's' });
-            await new Promise(r => setTimeout(r, checkDelay));
-        }
-        return { tool, result: `✅ TERDAFTAR (${reg.length}):\n` + reg.join('\n') + `\n\n❌ TIDAK (${nreg.length}):\n` + nreg.join('\n'), copyData: reg.join('\n') };
-    }
-    else if (tool === 'fix') {
-        const num = formatNumber(payload.number);
-        const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: db.getSetting('active_email'), pass: db.getSetting('active_pass') } });
-        await transporter.sendMail({ from: db.getSetting('active_email'), to: 'android@support.whatsapp.com', subject: 'Request', text: `Hello WA, unban ${num}` });
-        return { tool, result: `✅ FIX SENT to ${num}!`, copyData: num };
-    }
-    else if (tool === 'banding') {
-        const num = formatNumber(payload.number);
-        return { tool, result: `📋 BANDING\n\n📱 +${num}\n\nHello WA, unban +${num}`, copyData: num };
-    }
-}
-
-// ================= SOCKET.IO HANDLER =================
-io.on('connection', (socket) => {
-    log('Client Connected: ' + socket.id);
-    try { socket.emit('init_data', { settings: db.load('settings'), sessions: db.load('wa_sessions') }); io.emit('live_stats', { onlineUsers: io.engine.clientsCount }); } catch(e) {}
-
-    socket.on('login', (password, callback) => { try { const sysPass = db.getSetting('auth_password'); if (!sysPass || sysPass === '') return callback({ success: true }); if (password === sysPass) return callback({ success: true }); callback({ success: false }); } catch(e) { callback({ success: false }); } });
-    socket.on('request_qr', (data) => startWhatsApp(data.sessionId));
-    socket.on('disconnect_wa', (data) => disconnectWhatsApp(data.sessionId, data.delete));
-    socket.on('request_pairing', (data) => { const sessionId = data.sessionId; if(activeSockets[sessionId]?.status === 'connected') return; startWhatsApp(sessionId); setTimeout(async () => { const sock = activeSockets[sessionId]?.sock; if(sock) { try { const code = await sock.requestPairingCode(data.number); io.emit('pairing_code', { sessionId, code: code.match(/.{1,4}/g)?.join('-') || code }); } catch(e) {} } }, 4000); });
-    socket.on('run_tool', (data) => { if (db.getSetting('maintenance_mode')) return socket.emit('tool_result', { tool: data.tool, result: '🛠 Maintenance Mode Active.', copyData: '' }); data.socketId = socket.id; taskQueue.push(data); processQueue(); });
-    socket.on('save_settings', (data) => { try { Object.keys(data).forEach(k => db.setSetting(k, data[k])); log('Settings updated.'); } catch(e) {} });
-    socket.on('clear_logs', () => { try { db.save('logs', []); log('Logs cleared.'); } catch(e) {} });
-    socket.on('visitor_info', (data) => { try { const v = db.load('visitor'); v.push({...data, time: new Date().toISOString()}); db.save('visitor', v.slice(-500)); } catch(e) {} });
-    socket.on('disconnect', () => { try { io.emit('live_stats', { onlineUsers: io.engine.clientsCount }); } catch(e) {} });
-});
-
-// ================= API & EXPORT =================
-app.post('/api/upload', upload.single('file'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    try {
-        const ext = req.file.originalname.split('.').pop().toLowerCase();
-        const uniqueNums = new Set();
-        if (ext === 'txt') fs.readFileSync(req.file.path, 'utf8').split('\n').forEach(line => { const num = formatNumber(line.trim()); if (isValidNumber(num)) uniqueNums.add(num); });
-        else if (ext === 'csv') { await new Promise((resolve, reject) => { fs.createReadStream(req.file.path).pipe(csv()).on('data', (row) => { Object.values(row).forEach(val => { const num = formatNumber(String(val).trim()); if (isValidNumber(num)) uniqueNums.add(num); }); }).on('end', resolve).on('error', reject); }); }
-        else if (ext === 'xlsx' || ext === 'xls') { const wb = XLSX.readFile(req.file.path); XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }).flat().forEach(val => { const num = formatNumber(String(val).trim()); if (isValidNumber(num)) uniqueNums.add(num); }); }
-        else if (ext === 'json') { const jsonData = JSON.parse(fs.readFileSync(req.file.path, 'utf8')); if(Array.isArray(jsonData)) jsonData.forEach(val => { const num = formatNumber(String(val).trim()); if (isValidNumber(num)) uniqueNums.add(num); }); }
-        try { fs.unlinkSync(req.file.path); } catch(e) {}
-        res.json({ numbers: Array.from(uniqueNums) });
-    } catch(error) { res.status(500).json({ error: 'Failed to process file' }); }
-});
-
-app.get('/api/export/:format', (req, res) => {
-    const { format } = req.params; const data = req.query.data; if (!data) return res.status(400).send('No data');
-    if (format === 'txt') { res.setHeader('Content-Type', 'text/plain'); res.setHeader('Content-Disposition', 'attachment; filename=result.txt'); res.send(data.replace(/\|/g, ' | ')); }
-    else if (format === 'csv') { res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename=result.csv'); let c = "Number,Bio,Type,YearSet\n"; data.split('\n').forEach(l => { const p=l.split('|'); c+=`${p[0]},${p[1]||''},${p[2]||''},${p[3]||''}\n`; }); res.send(c); }
-    else if (format === 'json') { res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', 'attachment; filename=result.json'); let j=[]; data.split('\n').forEach(l => { if(l.trim()){const p=l.split('|');j.push({number:p[0],bio:p[1]||'',type:p[2]||'',year:p[3]||''});}}); res.send(JSON.stringify(j, null, 2)); }
-    else res.status(400).send('Invalid format');
-});
-
-// ================= SYSTEM MONITOR (FALLBACK) =================
-setInterval(async () => {
-    try {
-        let cpuLoad = 0;
-        if (si) { const cpu = await si.currentLoad(); cpuLoad = Math.round(cpu.currentLoad); }
-        else { const loads = os.loadavg(); cpuLoad = Math.round((loads[0] / os.cpus().length) * 100); } // Fallback
+    <!-- MAIN CONTENT -->
+    <div class="flex-1 flex flex-col overflow-hidden relative content-layer">
         
-        const ram = await si?.mem() || { total: os.totalmem(), used: os.totalmem() - os.freemem() };
-        io.emit('system_stats', { cpu: cpuLoad, ramUsed: Math.round(((ram.used || (os.totalmem()-os.freemem())) / (ram.total || os.totalmem()))*100), visitors: db.load('visitor').length, uptime: os.uptime(), ping: Math.round(Math.random()*10+5) });
-    } catch(e) {}
-}, 3000);
+        <!-- Top Bar -->
+        <div class="h-16 flex items-center justify-between px-4 md:px-8 border-b border-dark-600 glass-card z-10">
+            <div class="flex items-center gap-3">
+                <button @click="sidebarOpen = true" class="md:hidden text-white text-xl"><i class="fas fa-bars"></i></button>
+                <h2 class="text-base md:text-lg font-bold text-white tracking-wide" x-text="currentPageTitle"></h2>
+            </div>
+            <div class="flex items-center gap-3">
+                <select x-model="activeSession" class="bg-dark-700 border border-dark-600 rounded-lg px-2 py-1 text-[11px] text-white outline-none focus:border-neon-blue max-w-[120px]">
+                    <template x-for="s in sessions" :key="s.sessionId"><option :value="s.sessionId" x-text="s.sessionId"></option></template>
+                </select>
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-dark-700 border border-dark-600 text-[11px] font-semibold">
+                    <i class="fas fa-circle text-[6px]" :class="waStatus[activeSession]?.status === 'connected' ? 'text-neon-green' : 'text-neon-red'"></i>
+                    <span x-text="waStatus[activeSession]?.status === 'connected' ? 'ON' : 'OFF'"></span>
+                </div>
+            </div>
+        </div>
 
-// ================= START SERVER =================
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n╔═════════════════════════════════════════════════════════════════╗`);
-    console.log(`║   🚀 ADI FIX RED v10.1 - CLOUD ANTI-CRASH                    ║`);
-    console.log(`║   🌐 Listening on PORT: ${PORT}                                  ║`);
-    console.log(`║   📱 PWA Ready | 🔒 Auth | ⚡ GZIP | 🛡 CPU Protect          ║`);
-    console.log(`╚═════════════════════════════════════════════════════════════════╝\n`);
-    try { db.load('wa_sessions').filter(s => s.status === 'connected').forEach(s => startWhatsApp(s.sessionId)); } catch(e) {}
-});
+        <!-- Content Area -->
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+            
+            <!-- DASHBOARD -->
+            <div x-show="currentPage === 'dashboard'" class="space-y-6" x-cloak>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="glass-card p-4 rounded-xl neon-border-blue float-anim"><p class="text-[10px] text-gray-400 uppercase">Process</p><p class="text-2xl font-bold text-white">1,245</p></div>
+                    <div class="glass-card p-4 rounded-xl neon-border-green float-anim" style="animation-delay: 0.2s"><p class="text-[10px] text-gray-400 uppercase">Online</p><p class="text-2xl font-bold text-neon-green" x-text="liveStats.onlineUsers"></p></div>
+                    <div class="glass-card p-4 rounded-xl neon-border-purple float-anim" style="animation-delay: 0.4s"><p class="text-[10px] text-gray-400 uppercase">Visitors</p><p class="text-2xl font-bold text-neon-purple" x-text="sysStats.visitors"></p></div>
+                    <div class="glass-card p-4 rounded-xl neon-border-yellow float-anim" style="animation-delay: 0.6s"><p class="text-[10px] text-gray-400 uppercase">Uptime</p><p class="text-2xl font-bold text-neon-yellow" x-text="Math.floor(sysStats.uptime / 3600) + 'h'"></p></div>
+                </div>
+                <div class="glass-card p-4 rounded-xl neon-border-blue">
+                    <div class="flex justify-between items-center mb-2"><h3 class="text-xs font-bold text-gray-300 uppercase"><i class="fas fa-terminal text-neon-green mr-2"></i>System Logs</h3><button @click="clearLogs()" class="text-[10px] text-neon-red hover:text-white"><i class="fas fa-trash"></i> Clear</button></div>
+                    <div class="bg-dark-900 p-3 rounded-lg h-48 md:h-64 overflow-y-auto font-mono text-[11px] text-gray-400 space-y-1 border border-dark-700" x-ref="logContainer">
+                        <template x-for="(log, index) in logs" :key="index"><p><span class="text-neon-blue" x-text="log.time"></span> <span x-text="log.msg"></span></p></template>
+                    </div>
+                </div>
+                <div class="glass-card p-4 rounded-xl neon-border-purple h-64"><canvas id="statsChart"></canvas></div>
+            </div>
+
+            <!-- WA CONNECTION -->
+            <div x-show="currentPage === 'connection'" class="max-w-lg mx-auto space-y-4" x-cloak>
+                <div class="glass-card p-4 rounded-xl neon-border-blue flex justify-between items-center">
+                    <h3 class="font-bold text-sm text-white">Session Manager</h3>
+                    <div class="flex gap-2">
+                        <button @click="addSession()" class="px-3 py-1 bg-neon-green/20 border border-neon-green/30 rounded-md text-neon-green text-[10px] font-bold"><i class="fas fa-plus"></i> Add</button>
+                        <button @click="deleteSession()" class="px-3 py-1 bg-neon-red/20 border border-neon-red/30 rounded-md text-neon-red text-[10px] font-bold"><i class="fas fa-trash"></i> Del</button>
+                    </div>
+                </div>
+                <div class="glass-card p-6 rounded-2xl neon-border-green space-y-4 text-center">
+                    <div x-show="waStatus[activeSession]?.status !== 'connected'">
+                        <div x-show="waStatus[activeSession]?.qr" class="flex justify-center mb-4"><img :src="waStatus[activeSession]?.qr" class="w-56 h-56 bg-white p-2 rounded-lg"></div>
+                        <div x-show="waStatus[activeSession]?.pairing" class="p-4 bg-dark-900 rounded-xl border border-dashed border-neon-yellow mb-4"><p class="text-[10px] text-gray-400">Pairing Code</p><h2 class="text-4xl font-black text-neon-yellow tracking-[0.3em]" x-text="waStatus[activeSession]?.pairing"></h2></div>
+                        <div class="space-y-3">
+                            <input type="text" x-model="pairInput" placeholder="628xxx" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-3 text-sm text-white outline-none">
+                            <button @click="reqPairing()" class="w-full bg-neon-green text-dark-900 py-3 rounded-xl text-sm font-bold btn-glow"><i class="fas fa-link mr-2"></i>Pairing</button>
+                            <button @click="reqQR()" class="w-full bg-neon-blue text-dark-900 py-3 rounded-xl text-sm font-bold btn-glow"><i class="fas fa-qrcode mr-2"></i>QR Code</button>
+                        </div>
+                    </div>
+                    <div x-show="waStatus[activeSession]?.status === 'connected'">
+                        <div class="p-6 bg-neon-green/10 border border-neon-green/30 rounded-xl text-neon-green font-bold text-lg mb-4">✅ WA CONNECTED</div>
+                        <button @click="disconnectWA(false)" class="w-full bg-neon-yellow text-dark-900 py-3 rounded-xl text-sm font-bold btn-glow mb-2"><i class="fas fa-power-off mr-2"></i>Disconnect</button>
+                        <button @click="disconnectWA(true)" class="w-full bg-neon-red text-white py-3 rounded-xl text-sm font-bold btn-glow"><i class="fas fa-trash mr-2"></i>Delete Session</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WA TOOLS -->
+            <div x-show="currentPage === 'tools'" class="grid grid-cols-1 md:grid-cols-2 gap-4" x-cloak>
+                <div class="glass-card p-5 rounded-xl neon-border-blue">
+                    <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-id-badge text-neon-blue mr-2"></i>Cek Bio WA</h3>
+                    <div class="mb-3 border-2 border-dashed border-dark-600 rounded-lg p-4 text-center cursor-pointer" @click="$refs.fileInputBio.click()">
+                        <input type="file" x-ref="fileInputBio" class="hidden" accept=".txt,.csv,.xlsx,.json" @change="handleFileUpload($event)"><i class="fas fa-cloud-upload-alt text-neon-blue text-xl"></i><p class="text-[11px] text-gray-400 mt-1">Upload File</p>
+                    </div>
+                    <textarea x-model="toolInput" rows="3" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-2 text-xs mb-3 outline-none" placeholder="Input manual..."></textarea>
+                    <button @click="runTool('cekbio')" :disabled="isLoading" class="w-full bg-neon-blue text-dark-900 py-2.5 rounded-lg text-xs font-bold btn-glow disabled:opacity-50"><i class="fas fa-search mr-1"></i> Cek Bio</button>
+                </div>
+                <div class="glass-card p-5 rounded-xl neon-border-green">
+                    <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-check-circle text-neon-green mr-2"></i>Cek Nomor</h3>
+                    <div class="mb-3 border-2 border-dashed border-dark-600 rounded-lg p-4 text-center cursor-pointer" @click="$refs.fileInputNom.click()">
+                        <input type="file" x-ref="fileInputNom" class="hidden" accept=".txt,.csv,.xlsx,.json" @change="handleFileUpload($event)"><i class="fas fa-cloud-upload-alt text-neon-green text-xl"></i><p class="text-[11px] text-gray-400 mt-1">Upload File</p>
+                    </div>
+                    <textarea x-model="toolInput" rows="3" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-2 text-xs mb-3 outline-none" placeholder="Input manual..."></textarea>
+                    <button @click="runTool('ceknom')" :disabled="isLoading" class="w-full bg-neon-green text-dark-900 py-2.5 rounded-lg text-xs font-bold btn-glow disabled:opacity-50"><i class="fas fa-search mr-1"></i> Cek Nomor</button>
+                </div>
+                
+                <!-- Progress Bar with ETA -->
+                <div x-show="isLoading && progress.total > 0" class="glass-card p-4 rounded-xl md:col-span-2 neon-border-purple">
+                    <div class="flex justify-between text-xs mb-1"><span class="text-gray-400">Processing...</span><span class="text-neon-purple" x-text="progress.current + '/' + progress.total + ' | ETA: ' + progress.eta"></span></div>
+                    <div class="w-full bg-dark-700 rounded-full h-2"><div class="bg-neon-purple h-2 rounded-full transition-all" :style="`width: ${(progress.current / progress.total) * 100}%`"></div></div>
+                </div>
+
+                <div class="glass-card p-5 rounded-xl md:col-span-2 neon-border-purple">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-3 gap-2">
+                        <h3 class="font-bold text-white flex items-center text-sm"><i class="fas fa-chart-bar text-neon-purple mr-2"></i>Result & Stats</h3>
+                        <input type="text" x-model="searchResult" class="w-full md:w-48 bg-dark-900 border border-dark-600 rounded-lg px-3 py-1.5 text-[11px] outline-none" placeholder="Search result...">
+                        <div class="flex gap-2">
+                            <button @click="exportData('txt')" class="px-2 py-1 bg-dark-600 border border-dark-500 rounded text-[10px] text-gray-400 hover:bg-dark-500">TXT</button>
+                            <button @click="exportData('csv')" class="px-2 py-1 bg-dark-600 border border-dark-500 rounded text-[10px] text-gray-400 hover:bg-dark-500">CSV</button>
+                            <button @click="exportData('json')" class="px-2 py-1 bg-dark-600 border border-dark-500 rounded text-[10px] text-gray-400 hover:bg-dark-500">JSON</button>
+                            <button @click="copyResults()" class="px-3 py-1 bg-neon-purple/20 border border-neon-purple/30 rounded text-neon-purple text-[10px]">Copy</button>
+                        </div>
+                    </div>
+                    <div class="bg-dark-900 p-3 rounded-lg h-64 md:h-80 overflow-y-auto font-mono text-[11px] text-gray-400 whitespace-pre-wrap border border-dark-700" x-text="filteredResult"></div>
+                </div>
+            </div>
+
+            <!-- FIX & BANDING -->
+            <div x-show="currentPage === 'fix'" class="grid grid-cols-1 md:grid-cols-2 gap-4" x-cloak>
+                <div class="glass-card p-5 rounded-xl neon-border-yellow">
+                    <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-envelope text-neon-yellow mr-2"></i>Fix Merah</h3>
+                    <input type="text" x-model="fixNumber" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-3 text-xs mb-3 outline-none" placeholder="628xxx">
+                    <button @click="runTool('fix')" :disabled="isLoading" class="w-full bg-neon-yellow text-dark-900 py-2.5 rounded-lg text-xs font-bold btn-glow disabled:opacity-50"><i class="fas fa-paper-plane mr-1"></i> Fix</button>
+                </div>
+                <div class="glass-card p-5 rounded-xl neon-border-purple">
+                    <h3 class="font-bold text-white mb-3 flex items-center text-sm"><i class="fas fa-gavel text-neon-purple mr-2"></i>Banding</h3>
+                    <input type="text" x-model="fixNumber" class="w-full bg-dark-900 border border-dark-600 rounded-lg p-3 text-xs mb-3 outline-none" placeholder="628xxx">
+                    <button @click="runTool('banding')" :disabled="isLoading" class="w-full bg-neon-purple text-white py-2.5 rounded-lg text-xs font-bold btn-glow disabled:opacity-50"><i class="fas fa-balance-scale mr-1"></i> Banding</button>
+                </div>
+                <div class="glass-card p-5 rounded-xl md:col-span-2 neon-border-blue">
+                    <div class="flex justify-between items-center mb-3"><h3 class="font-bold text-white text-sm"><i class="fas fa-terminal text-neon-blue mr-2"></i>Output</h3><button @click="copyResults()" class="px-3 py-1 bg-neon-blue/20 border border-neon-blue/30 rounded text-neon-blue text-[10px]">Copy</button></div>
+                    <div class="bg-dark-900 p-3 rounded-lg h-48 md:h-64 overflow-y-auto font-mono text-[11px] text-gray-400 whitespace-pre-wrap border border-dark-700" x-text="toolResult || 'Waiting...'"></div>
+                </div>
+            </div>
+
+            <!-- SETTINGS -->
+            <div x-show="currentPage === 'settings'" class="max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4" x-cloak>
+                <div class="glass-card p-5 rounded-xl neon-border-blue space-y-3">
+                    <h3 class="font-bold text-white text-sm"><i class="fas fa-cog text-neon-blue mr-2"></i>System Config</h3>
+                    <input type="email" x-model="setEmail" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Email SMTP">
+                    <input type="text" x-model="setPass" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="App Password">
+                    <input type="text" x-model="setTgChannel" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Link Channel TG">
+                    <input type="text" x-model="setTgGroup" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Link Grup TG">
+                    <input type="password" x-model="setAuthPass" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none" placeholder="Login Password (Empty=No Pass)">
+                    <button @click="saveConfig()" class="w-full bg-neon-blue text-dark-900 py-2.5 rounded-xl text-xs font-bold btn-glow"><i class="fas fa-save mr-1"></i> Save</button>
+                </div>
+                <div class="glass-card p-5 rounded-xl neon-border-purple space-y-3">
+                    <h3 class="font-bold text-white text-sm"><i class="fas fa-sliders-h text-neon-purple mr-2"></i>Performance</h3>
+                    <div><label class="text-[10px] text-gray-400">Check Delay (ms)</label><input type="number" x-model="setDelay" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none"></div>
+                    <div><label class="text-[10px] text-gray-400">Cooldown Frontend (s)</label><input type="number" x-model="setCooldown" class="w-full bg-dark-900 border border-dark-600 rounded-xl px-4 py-2.5 text-xs text-white outline-none"></div>
+                    <button @click="saveLimits()" class="w-full bg-neon-purple text-white py-2.5 rounded-xl text-xs font-bold btn-glow"><i class="fas fa-save mr-1"></i> Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function playSound(type) {
+    try { const ctx = new (window.AudioContext || window.webkitAudioContext)(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.connect(gain); gain.connect(ctx.destination); gain.gain.value = 0.1; osc.frequency.value = type === 'success' ? 900 : 300; osc.type = 'sine'; osc.start(); osc.stop(ctx.currentTime + 0.15); } catch(e) {}
+}
+
+function app() {
+    return {
+        currentPage: 'dashboard', sidebarOpen: false, isAuthenticated: false, authPassword: '', isServerOnline: true,
+        pairInput: '', toolInput: '', toolResult: '', copyData: '', fixNumber: '', searchResult: '',
+        setEmail: '', setPass: '', setDelay: '1000', setCooldown: '5', setTgChannel: '', setTgGroup: '', setAuthPass: '',
+        isLoading: false, progress: { current: 0, total: 0, eta: '0s' },
+        logs: [], socket: null, sysStats: { cpu: 0, ramUsed: 0, visitors: 0, uptime: 0, ping: 0 }, liveStats: { onlineUsers: 0 },
+        toast: { show: false, type: 'success', title: '', msg: '', timer: null },
+        activeSession: 'default_admin', waStatus: {}, sessions: [], settings: {}, lastToolRun: 0,
+        
+        menuItems: [
+            { id: 'dashboard', label: 'Dashboard', icon: 'fas fa-chart-line' },
+            { id: 'connection', label: 'My WA', icon: 'fab fa-whatsapp' },
+            { id: 'tools', label: 'Checker', icon: 'fas fa-search' },
+            { id: 'fix', label: 'Fix', icon: 'fas fa-first-aid' },
+            { id: 'settings', label: 'Settings', icon: 'fas fa-cog' }
+        ],
+        get currentPageTitle() { return this.menuItems.find(i => i.id === this.currentPage)?.label || ''; },
+        get filteredResult() { if(!this.searchResult) return this.toolResult; return this.toolResult.split('\n').filter(line => line.toLowerCase().includes(this.searchResult.toLowerCase())).join('\n'); },
+
+        init() {
+            // Auto connect socket to current domain (Perfect for Pxxl/Cloud)
+            this.socket = io();
+            
+            this.socket.on('connect', () => { this.isServerOnline = true; });
+            this.socket.on('disconnect', () => { this.isServerOnline = false; });
+
+            this.socket.on('init_data', (data) => {
+                this.settings = data.settings; this.sessions = data.sessions;
+                if(this.sessions.length > 0 && !this.sessions.find(s => s.sessionId === this.activeSession)) this.activeSession = this.sessions[0].sessionId;
+                if(data.settings.auth_password && data.settings.auth_password !== '') this.isAuthenticated = false;
+                else this.isAuthenticated = true;
+                this.initFormValues(data.settings);
+                data.sessions.forEach(s => { if(!this.waStatus[s.sessionId]) this.waStatus[s.sessionId] = {}; this.waStatus[s.sessionId].status = s.status; });
+            });
+
+            this.socket.on('log', (msg) => { this.logs.push({ time: new Date().toLocaleTimeString(), msg }); if (this.logs.length > 150) this.logs.shift(); this.$nextTick(() => { if (this.$refs.logContainer) this.$refs.logContainer.scrollTop = this.$refs.logContainer.scrollHeight; }); });
+            this.socket.on('wa_status', (data) => { if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {}; this.waStatus[data.sessionId].status = data.status; if(data.number) this.waStatus[data.sessionId].number = data.number; if(data.status === 'connected') { this.isLoading = false; playSound('success'); this.showToast('success', 'Connected!', `WA ${data.sessionId} Online`); } if(data.status === 'disconnected' && this.waStatus[data.sessionId]?.number) { playSound('error'); this.showToast('error', 'Disconnected!', `WA ${data.sessionId} Offline`); } });
+            this.socket.on('qr', (data) => { if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {}; this.waStatus[data.sessionId].qr = data.qr; this.waStatus[data.sessionId].pairing = null; this.isLoading = false; });
+            this.socket.on('pairing_code', (data) => { if(!this.waStatus[data.sessionId]) this.waStatus[data.sessionId] = {}; this.waStatus[data.sessionId].pairing = data.code; this.waStatus[data.sessionId].qr = null; this.isLoading = false; });
+            this.socket.on('progress', (data) => { this.progress = data; });
+            this.socket.on('system_stats', (stats) => { this.sysStats = stats; });
+            this.socket.on('live_stats', (stats) => { this.liveStats = stats; });
+            this.socket.on('tool_result', (data) => { this.toolResult = data.result; this.copyData = data.copyData || ''; this.isLoading = false; this.progress = { current: 0, total: 0, eta: '0s' }; this.showToast('success', 'Done!', 'Process finished.'); playSound('success'); });
+
+            const ctx = document.getElementById('statsChart')?.getContext('2d');
+            if(ctx) new Chart(ctx, { type: 'line', data: { labels: ['1','2','3','4','5'], datasets: [{ label: 'Process', data: [12, 19, 3, 5, 2], borderColor: '#00d4ff', tension: 0.1 }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
+        },
+
+        initFormValues(s) { this.setEmail=s.active_email; this.setPass=s.active_pass; this.setDelay=s.check_delay; this.setCooldown=s.cooldown_time/1000; this.setTgChannel=s.tg_channel; this.setTgGroup=s.tg_group; this.setAuthPass=s.auth_password; },
+        login() { this.socket.emit('login', this.authPassword, (res) => { if(res.success) { this.isAuthenticated = true; playSound('success'); } else this.showToast('error', 'Error', 'Wrong Password'); }); },
+        showToast(type, title, msg) { if(this.toast.timer) clearTimeout(this.toast.timer); this.toast = { show: true, type, title, msg, timer: null }; this.toast.timer = setTimeout(() => { this.toast.show = false; }, 4000); },
+        copyResults() { navigator.clipboard.writeText(this.copyData).then(() => { this.showToast('success', 'Copied!', ''); playSound('success'); }); },
+        exportData(format) { window.open(`/api/export/${format}?data=${encodeURIComponent(this.copyData)}`, '_blank'); },
+        clearLogs() { this.logs = []; this.socket.emit('clear_logs'); },
+        addSession() { const id = prompt("Enter Session ID (e.g., user_3):"); if(id && !this.sessions.find(s=>s.sessionId===id)) { this.sessions.push({sessionId: id, status: 'disconnected'}); this.activeSession = id; this.waStatus[id] = {status:'disconnected'}; } },
+        deleteSession() { if(confirm(`Delete ${this.activeSession}?`)) { this.socket.emit('disconnect_wa', { sessionId: this.activeSession, delete: true }); this.sessions = this.sessions.filter(s=>s.sessionId !== this.activeSession); this.activeSession = this.sessions[0]?.sessionId || 'default_admin'; } },
+        async handleFileUpload(event) { const file = event.target.files[0]; if (!file) return; const formData = new FormData(); formData.append('file', file); try { const res = await fetch('/api/upload', { method: 'POST', body: formData }); const data = await res.json(); if(data.numbers) { this.toolInput = data.numbers.join('\n'); this.showToast('success', 'Loaded', `${data.numbers.length} valid numbers`); } else this.showToast('error', 'Error', 'Invalid file'); } catch(e) { this.showToast('error', 'Error', 'Upload failed'); } },
+        reqPairing() { if (!this.pairInput) return; this.isLoading = true; this.socket.emit('request_pairing', { sessionId: this.activeSession, number: this.pairInput }); },
+        reqQR() { this.isLoading = true; this.socket.emit('request_qr', { sessionId: this.activeSession }); },
+        disconnectWA(del = false) { this.socket.emit('disconnect_wa', { sessionId: this.activeSession, delete: del }); },
+        runTool(tool) { if (this.isLoading) return; const now = Date.now(); if (now - this.lastToolRun < (this.setCooldown * 1000)) return this.showToast('error', 'Cooldown', 'Wait...'); this.lastToolRun = now; if (!this.toolInput && (tool === 'cekbio' || tool === 'ceknom')) return this.showToast('error', 'Error', 'No input!'); if (!this.fixNumber && (tool === 'fix' || tool === 'banding')) return this.showToast('error', 'Error', 'No target!'); this.isLoading = true; this.toolResult = 'Queued...'; this.copyData = ''; this.progress = { current: 0, total: 0, eta: '0s' }; this.socket.emit('run_tool', { tool, payload: { numbers: this.toolInput, number: this.fixNumber, sessionId: this.activeSession } }); },
+        saveConfig() { this.socket.emit('save_settings', { active_email: this.setEmail, active_pass: this.setPass, tg_channel: this.setTgChannel, tg_group: this.setTgGroup, auth_password: this.setAuthPass }); this.showToast('success', 'Saved', 'Config updated'); },
+        saveLimits() { this.socket.emit('save_settings', { check_delay: this.setDelay, cooldown_time: this.setCooldown * 1000 }); this.showToast('success', 'Saved', 'Performance updated'); }
+    }
+}
+</script>
+</body>
+</html>
